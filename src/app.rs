@@ -19,6 +19,7 @@ pub struct App {
     pub wrap: bool,
     pub status_note: Option<String>,
     pub from_picker: bool,
+    pub viewport_h: usize,
 }
 
 impl App {
@@ -55,6 +56,7 @@ impl App {
             wrap: true,
             status_note: None,
             from_picker: false,
+            viewport_h: 20,
         }
     }
     pub fn load_file(path: &Path, from_picker: bool) -> Result<Self> {
@@ -74,6 +76,7 @@ impl App {
             wrap: true,
             status_note: lossy.then(|| "[lossy UTF-8]".to_string()),
             from_picker,
+            viewport_h: 20,
         })
     }
 }
@@ -94,6 +97,7 @@ mod tests {
             wrap: true,
             status_note: None,
             from_picker: false,
+            viewport_h: 20,
         }
     }
     #[test]

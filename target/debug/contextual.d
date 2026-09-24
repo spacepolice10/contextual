@@ -1,0 +1,1 @@
+/Users/spcpolice/Projects/contextual/target/debug/contextual: /Users/spcpolice/Projects/contextual/src/app.rs /Users/spcpolice/Projects/contextual/src/main.rs /Users/spcpolice/Projects/contextual/src/picker.rs /Users/spcpolice/Projects/contextual/src/viewer.rs

@@ -55,6 +55,7 @@ fn main() -> Result<()> {
         term.draw(|f| render(f, &mut app))?;
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(k) = event::read()? {
+                app.viewport_h = term.size()?.height.saturating_sub(3) as usize;
                 if handle(&mut app, k.code, k.modifiers)? {
                     break;
                 }
@@ -99,19 +100,23 @@ fn handle(app: &mut app::App, code: KeyCode, mods: KeyModifiers) -> Result<bool>
                 }
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                app.scroll_by(1, 20);
+                let vh = app.viewport_h;
+                app.scroll_by(1, vh);
                 Ok(false)
             }
             KeyCode::Up | KeyCode::Char('k') => {
-                app.scroll_by(-1, 20);
+                let vh = app.viewport_h;
+                app.scroll_by(-1, vh);
                 Ok(false)
             }
             KeyCode::PageDown => {
-                app.scroll_by(20, 20);
+                let vh = app.viewport_h;
+                app.scroll_by(vh as isize, vh);
                 Ok(false)
             }
             KeyCode::PageUp => {
-                app.scroll_by(-20, 20);
+                let vh = app.viewport_h;
+                app.scroll_by(-(vh as isize), vh);
                 Ok(false)
             }
             KeyCode::Home | KeyCode::Char('g') => {
@@ -120,7 +125,8 @@ fn handle(app: &mut app::App, code: KeyCode, mods: KeyModifiers) -> Result<bool>
             }
             KeyCode::End | KeyCode::Char('G') => {
                 app.scroll = usize::MAX;
-                app.scroll_by(0, 20);
+                let vh = app.viewport_h;
+                app.scroll_by(0, vh);
                 Ok(false)
             }
             KeyCode::Char('w') => {
@@ -132,7 +138,7 @@ fn handle(app: &mut app::App, code: KeyCode, mods: KeyModifiers) -> Result<bool>
                 Ok(false)
             }
             KeyCode::Right => {
-                app.h_scroll += 4;
+                app.h_scroll = app.h_scroll.saturating_add(4);
                 Ok(false)
             }
             _ => Ok(false),
@@ -183,6 +189,7 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
             let display = viewer::build_display_lines(&app.lines, text_w.max(1), app.wrap);
             let total = display.len();
             let vh = chunks[0].height as usize;
+            app.viewport_h = vh;
             app.scroll = viewer::clamp_scroll(app.scroll, total, vh);
             let max_width = app
                 .lines
