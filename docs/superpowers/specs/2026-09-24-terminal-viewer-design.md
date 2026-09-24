@@ -57,8 +57,9 @@ Viewer:
 ## Error handling
 - All fallible fns return `anyhow::Result`.
 - Terminal restore guaranteed via guard (`Drop` disables raw mode, leaves alt screen).
-- Missing file / permission / read_dir fail → error screen with message + `q`,
-  plus stderr message on exit. No panics on user IO.
+- Missing file / permission / read_dir fail → propagate via anyhow, print
+  clean stderr message on exit (terminal restored by guard). No in-TUI error
+  screen in v1 (deferred). No panics on user IO.
 - Non-UTF8: `from_utf8_lossy`, status shows `[lossy UTF-8]`.
 - Directories / non-regular files excluded from picker; explicit dir arg → error.
 
