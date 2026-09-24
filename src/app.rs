@@ -106,7 +106,7 @@ impl App {
         let lines: Vec<String> = text.lines().map(|s| s.to_string()).collect();
         let theme = highlight::detect_theme();
         let lang = highlight::detect(path);
-        let highlighted = lang.map(|l| highlight::highlight_file(&text, l, theme));
+        let highlighted = lang.and_then(|l| highlight::highlight_file(&text, l, theme));
         Ok(Self {
             mode: Mode::Viewer,
             files: vec![],

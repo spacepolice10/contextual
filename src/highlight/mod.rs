@@ -82,23 +82,16 @@ pub fn detect(path: &Path) -> Option<Lang> {
 }
 
 /// Highlight a whole file into per-logical-line spans. Unknown language
-/// config (None) or empty text -> plain single-style lines. Never drops text.
+/// config (None) or backend failure -> None (plain render via Span::raw).
+/// Never drops text when Some.
 ///
 /// Blank lines yield empty vecs (renderable via `Line::from(vec![])`);
 /// nested highlights use top-of-stack style.
-pub fn highlight_file(text: &str, lang: Lang, theme: Theme) -> Vec<Vec<Span<'static>>> {
-    let Some(config) = langs::configuration(lang) else {
-        return text
-            .lines()
-            .map(|l| vec![Span::raw(l.to_string())])
-            .collect();
-    };
+pub fn highlight_file(text: &str, lang: Lang, theme: Theme) -> Option<Vec<Vec<Span<'static>>>> {
+    let config = langs::configuration(lang)?;
     let mut hl = Highlighter::new();
     let Ok(events) = hl.highlight(config, text.as_bytes(), None, None, |_| None) else {
-        return text
-            .lines()
-            .map(|l| vec![Span::raw(l.to_string())])
-            .collect();
+        return None;
     };
     let mut out: Vec<Vec<Span<'static>>> = vec![Vec::new()];
     let mut stack: Vec<usize> = Vec::new();
@@ -137,7 +130,7 @@ pub fn highlight_file(text: &str, lang: Lang, theme: Theme) -> Vec<Vec<Span<'sta
     if text.ends_with('\n') && out.last().is_some_and(Vec::is_empty) {
         out.pop();
     }
-    out
+    Some(out)
 }
 
 /// Char-based window over styled spans. Splits boundary spans, clones styles.
@@ -195,7 +188,8 @@ mod tests {
     }
     #[test]
     fn highlight_rust_keywords() {
-        let lines = highlight_file("fn main() {}", Lang::Rust, Theme::Dark);
+        let lines =
+            highlight_file("fn main() {}", Lang::Rust, Theme::Dark).expect("rust highlights");
         assert_eq!(lines.len(), 1);
         let flat: String = lines[0].iter().map(|s| s.content.as_ref()).collect();
         assert_eq!(flat, "fn main() {}");
@@ -203,7 +197,8 @@ mod tests {
     }
     #[test]
     fn highlight_block_comment_spans_lines() {
-        let lines = highlight_file("/* a\nb */\nfn f() {}", Lang::Rust, Theme::Dark);
+        let lines = highlight_file("/* a\nb */\nfn f() {}", Lang::Rust, Theme::Dark)
+            .expect("rust highlights");
         assert_eq!(lines.len(), 3);
         for line in &lines {
             assert!(!line.is_empty());
@@ -228,7 +223,7 @@ mod tests {
             if crate::highlight::langs::configuration(lang).is_none() {
                 continue; // feature off or deferred (e.g. markdown)
             }
-            let lines = highlight_file(src, lang, Theme::Dark);
+            let lines = highlight_file(src, lang, Theme::Dark).expect("config present => Some");
             let flat: String = lines
                 .iter()
                 .map(|l| {
@@ -247,13 +242,14 @@ mod tests {
     }
     #[test]
     fn highlight_trailing_newline_no_extra_line() {
-        let lines = highlight_file("fn f() {}\n", Lang::Rust, Theme::Dark);
+        let lines =
+            highlight_file("fn f() {}\n", Lang::Rust, Theme::Dark).expect("rust highlights");
         assert_eq!(lines.len(), 1);
     }
     #[test]
     fn highlight_multibyte_no_panic_flat_matches_source() {
         let src = "// héllo wörld 🌍\nfn f() {}";
-        let lines = highlight_file(src, Lang::Rust, Theme::Dark);
+        let lines = highlight_file(src, Lang::Rust, Theme::Dark).expect("rust highlights");
         let flat: String = lines
             .iter()
             .map(|l| l.iter().map(|s| s.content.as_ref()).collect::<String>())
@@ -264,7 +260,7 @@ mod tests {
     #[test]
     fn highlight_crlf_matches_lines_behavior() {
         let src = "a\r\nb\r\n";
-        let lines = highlight_file(src, Lang::Rust, Theme::Dark);
+        let lines = highlight_file(src, Lang::Rust, Theme::Dark).expect("rust highlights");
         assert_eq!(lines.len(), src.lines().count());
         let flat: String = lines
             .iter()
@@ -272,6 +268,10 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert_eq!(flat, "a\nb");
+    }
+    #[test]
+    fn highlight_unknown_config_returns_none() {
+        assert!(highlight_file("# hi\n", Lang::Markdown, Theme::Dark).is_none());
     }
     #[test]
     fn slice_spans_preserves_text_and_style() {

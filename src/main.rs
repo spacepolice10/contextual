@@ -285,7 +285,10 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
                         let mut before = highlight::slice_spans(&windowed, 0, rel_col);
                         let mut cur = highlight::slice_spans(&windowed, rel_col, 1);
                         for s in &mut cur {
-                            s.style = cursor_style;
+                            s.style = s.style.bg(Color::DarkGray);
+                            if s.style.fg.is_none() {
+                                s.style = s.style.fg(Color::White);
+                            }
                         }
                         let after =
                             highlight::slice_spans(&windowed, rel_col + 1, nchars - rel_col - 1);
