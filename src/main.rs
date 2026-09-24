@@ -100,45 +100,47 @@ fn handle(app: &mut app::App, code: KeyCode, mods: KeyModifiers) -> Result<bool>
                 }
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                let vh = app.viewport_h;
-                app.scroll_by(1, vh);
+                app.move_cursor_line(1);
                 Ok(false)
             }
             KeyCode::Up | KeyCode::Char('k') => {
-                let vh = app.viewport_h;
-                app.scroll_by(-1, vh);
+                app.move_cursor_line(-1);
                 Ok(false)
             }
             KeyCode::PageDown => {
                 let vh = app.viewport_h;
-                app.scroll_by(vh as isize, vh);
+                app.move_cursor_line(vh as isize);
                 Ok(false)
             }
             KeyCode::PageUp => {
                 let vh = app.viewport_h;
-                app.scroll_by(-(vh as isize), vh);
+                app.move_cursor_line(-(vh as isize));
                 Ok(false)
             }
             KeyCode::Home | KeyCode::Char('g') => {
+                app.cursor_line = 0;
+                app.cursor_col = 0;
                 app.scroll = 0;
                 Ok(false)
             }
             KeyCode::End | KeyCode::Char('G') => {
+                if !app.lines.is_empty() {
+                    app.cursor_line = app.lines.len() - 1;
+                    app.cursor_col = app.lines[app.cursor_line].chars().count();
+                }
                 app.scroll = usize::MAX;
-                let vh = app.viewport_h;
-                app.scroll_by(0, vh);
                 Ok(false)
             }
             KeyCode::Char('w') => {
                 app.toggle_wrap();
                 Ok(false)
             }
-            KeyCode::Left => {
-                app.h_scroll = app.h_scroll.saturating_sub(4);
+            KeyCode::Left | KeyCode::Char('h') => {
+                app.move_cursor_col(-1);
                 Ok(false)
             }
-            KeyCode::Right => {
-                app.h_scroll = app.h_scroll.saturating_add(4);
+            KeyCode::Right | KeyCode::Char('l') => {
+                app.move_cursor_col(1);
                 Ok(false)
             }
             _ => Ok(false),
@@ -198,9 +200,31 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
                 .max()
                 .unwrap_or(0);
             app.h_scroll = viewer::clamp_hscroll(app.h_scroll, max_width, text_w.max(1));
+            // Keep cursor visible: vertical via display row, horizontal when unwrapped.
+            let cursor_row = viewer::display_row_for_cursor(
+                &app.lines,
+                text_w.max(1),
+                app.wrap,
+                app.cursor_line,
+                app.cursor_col,
+            );
+            app.ensure_cursor_visible(cursor_row, vh);
+            app.scroll = viewer::clamp_scroll(app.scroll, total, vh);
+            if !app.wrap {
+                let tw = text_w.max(1);
+                if app.cursor_col < app.h_scroll {
+                    app.h_scroll = app.cursor_col;
+                } else if app.cursor_col >= app.h_scroll + tw {
+                    app.h_scroll = app.cursor_col + 1 - tw;
+                }
+                app.h_scroll = viewer::clamp_hscroll(app.h_scroll, max_width, tw);
+            }
             let end = (app.scroll + vh).min(total);
+            let cursor_style = Style::default().bg(Color::DarkGray).fg(Color::White);
             let mut text = Vec::new();
-            for (lidx, content) in display[app.scroll..end].iter() {
+            for (drow, (lidx, content)) in display[app.scroll..end].iter().enumerate() {
+                let abs_row = app.scroll + drow;
+                let _ = abs_row;
                 let shown = if app.wrap {
                     content.clone()
                 } else {
@@ -210,13 +234,39 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
                         .take(text_w.max(1))
                         .collect()
                 };
-                text.push(Line::from(vec![
-                    Span::styled(
-                        format!("{:>width$} ", lidx + 1, width = gutter - 1),
-                        Style::default().fg(Color::DarkGray),
-                    ),
-                    Span::raw(shown),
-                ]));
+                // Highlight the cursor cell on the cursor's display row.
+                let is_cursor_row = abs_row == cursor_row;
+                let body_span = if !is_cursor_row {
+                    vec![Span::raw(shown)]
+                } else {
+                    let chars: Vec<char> = shown.chars().collect();
+                    // Column offset inside this visible chunk.
+                    let rel_col = if app.wrap {
+                        let w = text_w.max(1);
+                        app.cursor_col % w.max(1)
+                    } else {
+                        app.cursor_col.saturating_sub(app.h_scroll)
+                    };
+                    if rel_col >= chars.len() {
+                        // Past end (or empty line): mark a space cell.
+                        vec![Span::raw(shown), Span::styled(" ", cursor_style)]
+                    } else {
+                        let before: String = chars[..rel_col].iter().collect();
+                        let cur: String = chars[rel_col..rel_col + 1].iter().collect();
+                        let after: String = chars[rel_col + 1..].iter().collect();
+                        vec![
+                            Span::raw(before),
+                            Span::styled(cur, cursor_style),
+                            Span::raw(after),
+                        ]
+                    }
+                };
+                let mut spans = vec![Span::styled(
+                    format!("{:>width$} ", lidx + 1, width = gutter - 1),
+                    Style::default().fg(Color::DarkGray),
+                )];
+                spans.extend(body_span);
+                text.push(Line::from(spans));
             }
             let body = Paragraph::new(text).block(
                 Block::default()
@@ -225,10 +275,12 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
             );
             f.render_widget(body, chunks[0]);
             let mut s = format!(
-                " {}  {}/{}  wrap:{}  [w]rap [q]uit ",
+                " {}  {}/{}  Ln {},Col {}  wrap:{}  [w]rap [q]uit ",
                 app.filename,
                 app.scroll + 1,
                 total.max(1),
+                app.cursor_line + 1,
+                app.cursor_col + 1,
                 if app.wrap { "ON" } else { "OFF" }
             );
             if let Some(n) = &app.status_note {
@@ -237,7 +289,7 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
             let bar = Paragraph::new(vec![
                 Line::from(Span::raw(s)),
                 Line::from(Span::styled(
-                    " ↑↓ scroll  PgUp/PgDn  g/G top/bottom  w wrap  ←→ h-scroll  q quit ",
+                    " hjkl/arrows move cursor  PgUp/PgDn  g/G top/bottom  w wrap  q quit ",
                     Style::default().fg(Color::Gray),
                 )),
             ]);

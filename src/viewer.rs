@@ -35,6 +35,36 @@ pub fn clamp_hscroll(h: usize, max_width: usize, viewport_w: usize) -> usize {
     h.min(max_width - viewport_w)
 }
 
+/// Display-row index containing logical (cursor_line, cursor_col).
+/// Wrap: rows of earlier lines (expanded) + chunk of this line holding the col.
+pub fn display_row_for_cursor(
+    lines: &[String],
+    width: usize,
+    wrap: bool,
+    cursor_line: usize,
+    cursor_col: usize,
+) -> usize {
+    if !wrap {
+        return cursor_line.min(lines.len().saturating_sub(1));
+    }
+    let w = width.max(1);
+    let mut row = 0;
+    for (i, line) in lines.iter().enumerate() {
+        let chunks = wrap_line(line, w).len().max(1);
+        if i < cursor_line {
+            row += chunks;
+        } else if i == cursor_line {
+            let nchars = line.chars().count();
+            let col = cursor_col.min(nchars);
+            row += (col / w).min(chunks - 1);
+            break;
+        } else {
+            break;
+        }
+    }
+    row
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -72,5 +102,17 @@ mod tests {
         let d = build_display_lines(&lines, 2, true);
         assert_eq!(d.len(), 3);
         assert_eq!(d[0], (0, "ab".to_string()));
+    }
+    #[test]
+    fn cursor_display_row_unwrapped() {
+        let lines = vec!["aaa".to_string(), "bbb".to_string()];
+        assert_eq!(display_row_for_cursor(&lines, 10, false, 1, 0), 1);
+    }
+    #[test]
+    fn cursor_display_row_wrapped() {
+        // "abcdef" at width 2 -> 3 display rows; col 3 lives in 2nd chunk.
+        let lines = vec!["abcdef".to_string(), "xy".to_string()];
+        assert_eq!(display_row_for_cursor(&lines, 2, true, 0, 3), 1);
+        assert_eq!(display_row_for_cursor(&lines, 2, true, 1, 0), 3);
     }
 }

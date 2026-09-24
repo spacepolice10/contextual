@@ -19,12 +19,11 @@ pub struct App {
     pub status_note: Option<String>,
     pub from_picker: bool,
     pub viewport_h: usize,
+    pub cursor_line: usize,
+    pub cursor_col: usize,
 }
 
 impl App {
-    pub fn scroll_by(&mut self, delta: isize, _viewport_h: usize) {
-        self.scroll = self.scroll.saturating_add_signed(delta);
-    }
     pub fn toggle_wrap(&mut self) {
         self.wrap = !self.wrap;
         self.h_scroll = 0;
@@ -33,6 +32,38 @@ impl App {
         let n = self.picker_index as isize + delta;
         let n = n.clamp(0, isize::MAX) as usize;
         self.picker_index = clamp_selection(n, self.files.len());
+    }
+    fn clamp_col(&self) -> usize {
+        self.lines
+            .get(self.cursor_line)
+            .map(|l| l.chars().count())
+            .unwrap_or(0)
+    }
+    pub fn move_cursor_line(&mut self, delta: isize) {
+        if self.lines.is_empty() {
+            self.cursor_line = 0;
+            self.cursor_col = 0;
+            return;
+        }
+        let n = (self.cursor_line as isize + delta).clamp(0, isize::MAX) as usize;
+        self.cursor_line = n.min(self.lines.len() - 1);
+        self.cursor_col = self.cursor_col.min(self.clamp_col());
+    }
+    pub fn move_cursor_col(&mut self, delta: isize) {
+        let max = self.clamp_col();
+        let n = (self.cursor_col as isize + delta).clamp(0, isize::MAX) as usize;
+        self.cursor_col = n.min(max);
+    }
+    /// Keep cursor's display row inside [scroll, scroll+viewport).
+    pub fn ensure_cursor_visible(&mut self, display_row: usize, viewport: usize) {
+        if viewport == 0 {
+            return;
+        }
+        if display_row < self.scroll {
+            self.scroll = display_row;
+        } else if display_row >= self.scroll + viewport {
+            self.scroll = display_row + 1 - viewport;
+        }
     }
 }
 
@@ -53,6 +84,8 @@ impl App {
             status_note: None,
             from_picker: false,
             viewport_h: 20,
+            cursor_line: 0,
+            cursor_col: 0,
         }
     }
     pub fn load_file(path: &Path, from_picker: bool) -> Result<Self> {
@@ -73,6 +106,8 @@ impl App {
             status_note: lossy.then(|| "[lossy UTF-8]".to_string()),
             from_picker,
             viewport_h: 20,
+            cursor_line: 0,
+            cursor_col: 0,
         })
     }
 }
@@ -94,16 +129,17 @@ mod tests {
             status_note: None,
             from_picker: false,
             viewport_h: 20,
+            cursor_line: 0,
+            cursor_col: 0,
         }
     }
     #[test]
-    fn scroll_down_clamps_to_max() {
-        // scroll_by defers clamping to render(); it only saturates.
+    fn scroll_follows_cursor() {
+        // ensure_cursor_visible keeps the cursor's display row in view.
         let mut a = viewer_app(10);
-        a.scroll_by(100, 5);
-        assert_eq!(a.scroll, 100);
-        // Underflow saturates at 0.
-        a.scroll_by(-200, 5);
+        a.ensure_cursor_visible(9, 5);
+        assert_eq!(a.scroll, 5);
+        a.ensure_cursor_visible(0, 5);
         assert_eq!(a.scroll, 0);
     }
     #[test]
@@ -120,5 +156,18 @@ mod tests {
         a.files = vec![];
         a.move_picker(5);
         assert_eq!(a.picker_index, 0);
+    }
+    #[test]
+    fn cursor_clamps_to_text() {
+        let mut a = viewer_app(3);
+        a.move_cursor_line(100);
+        assert_eq!(a.cursor_line, 2);
+        a.move_cursor_line(-100);
+        assert_eq!(a.cursor_line, 0);
+        // "line 0" is 6 chars; col clamps to 6.
+        a.move_cursor_col(100);
+        assert_eq!(a.cursor_col, 6);
+        a.move_cursor_col(-100);
+        assert_eq!(a.cursor_col, 0);
     }
 }
