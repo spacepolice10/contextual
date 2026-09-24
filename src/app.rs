@@ -1,5 +1,4 @@
 use crate::picker::{clamp_selection, FileEntry};
-use crate::viewer::clamp_scroll;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -23,11 +22,8 @@ pub struct App {
 }
 
 impl App {
-    pub fn scroll_by(&mut self, delta: isize, viewport_h: usize) {
-        let total_hint = self.lines.len().max(1);
-        let new = self.scroll as isize + delta;
-        let clamped = new.clamp(0, isize::MAX) as usize;
-        self.scroll = clamp_scroll(clamped, total_hint, viewport_h);
+    pub fn scroll_by(&mut self, delta: isize, _viewport_h: usize) {
+        self.scroll = self.scroll.saturating_add_signed(delta);
     }
     pub fn toggle_wrap(&mut self) {
         self.wrap = !self.wrap;
@@ -102,9 +98,13 @@ mod tests {
     }
     #[test]
     fn scroll_down_clamps_to_max() {
+        // scroll_by defers clamping to render(); it only saturates.
         let mut a = viewer_app(10);
         a.scroll_by(100, 5);
-        assert_eq!(a.scroll, 5);
+        assert_eq!(a.scroll, 100);
+        // Underflow saturates at 0.
+        a.scroll_by(-200, 5);
+        assert_eq!(a.scroll, 0);
     }
     #[test]
     fn toggle_wrap_flips() {
