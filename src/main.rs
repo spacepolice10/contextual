@@ -1,4 +1,5 @@
 mod app;
+mod highlight;
 mod picker;
 mod viewer;
 
