@@ -1,3 +1,4 @@
+mod app;
 mod picker;
 mod viewer;
 fn main() {
