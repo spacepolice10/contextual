@@ -1,6 +1,240 @@
 mod app;
 mod picker;
 mod viewer;
-fn main() {
-    println!("contextual ok");
+
+use anyhow::{Context, Result};
+use clap::Parser;
+use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use ratatui::{
+    backend::CrosstermBackend,
+    layout::{Constraint, Direction, Layout},
+    style::{Color, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, List, ListItem, Paragraph},
+    Terminal,
+};
+use std::{io, path::PathBuf, time::Duration};
+
+#[derive(Parser, Debug)]
+#[command(name = "contextual", about = "Minimal terminal text viewer")]
+struct Cli {
+    /// File to open. If omitted, shows picker for current directory.
+    path: Option<PathBuf>,
+}
+
+struct TerminalGuard;
+impl TerminalGuard {
+    fn enter() -> Result<Self> {
+        crossterm::terminal::enable_raw_mode().context("enable raw mode")?;
+        let mut out = io::stdout();
+        crossterm::execute!(out, crossterm::terminal::EnterAlternateScreen)
+            .context("enter alt screen")?;
+        Ok(Self)
+    }
+}
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        let _ = crossterm::terminal::disable_raw_mode();
+        let _ = crossterm::execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen);
+    }
+}
+
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+    let mut app = match cli.path {
+        Some(p) => app::App::load_file(&p, false)?,
+        None => {
+            let files = picker::list_files(std::path::Path::new("."))?;
+            app::App::new_picker(files)
+        }
+    };
+    let _guard = TerminalGuard::enter()?;
+    let backend = CrosstermBackend::new(io::stdout());
+    let mut term = Terminal::new(backend).context("create terminal")?;
+    loop {
+        term.draw(|f| render(f, &mut app))?;
+        if event::poll(Duration::from_millis(100))? {
+            if let Event::Key(k) = event::read()? {
+                if handle(&mut app, k.code, k.modifiers)? {
+                    break;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn handle(app: &mut app::App, code: KeyCode, mods: KeyModifiers) -> Result<bool> {
+    use app::Mode;
+    if mods.contains(KeyModifiers::CONTROL) && code == KeyCode::Char('c') {
+        return Ok(true);
+    }
+    match app.mode {
+        Mode::Picker => match code {
+            KeyCode::Char('q') | KeyCode::Esc => Ok(true),
+            KeyCode::Down | KeyCode::Char('j') => {
+                app.move_picker(1);
+                Ok(false)
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                app.move_picker(-1);
+                Ok(false)
+            }
+            KeyCode::Enter => {
+                if let Some(f) = app.files.get(app.picker_index).cloned() {
+                    *app = app::App::load_file(&f.path, true)?;
+                }
+                Ok(false)
+            }
+            _ => Ok(false),
+        },
+        Mode::Viewer => match code {
+            KeyCode::Char('q') | KeyCode::Esc => {
+                if app.from_picker && code == KeyCode::Esc {
+                    let files = picker::list_files(std::path::Path::new("."))?;
+                    *app = app::App::new_picker(files);
+                    Ok(false)
+                } else {
+                    Ok(true)
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                app.scroll_by(1, 20);
+                Ok(false)
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                app.scroll_by(-1, 20);
+                Ok(false)
+            }
+            KeyCode::PageDown => {
+                app.scroll_by(20, 20);
+                Ok(false)
+            }
+            KeyCode::PageUp => {
+                app.scroll_by(-20, 20);
+                Ok(false)
+            }
+            KeyCode::Home | KeyCode::Char('g') => {
+                app.scroll = 0;
+                Ok(false)
+            }
+            KeyCode::End | KeyCode::Char('G') => {
+                app.scroll = usize::MAX;
+                app.scroll_by(0, 20);
+                Ok(false)
+            }
+            KeyCode::Char('w') => {
+                app.toggle_wrap();
+                Ok(false)
+            }
+            KeyCode::Left => {
+                app.h_scroll = app.h_scroll.saturating_sub(4);
+                Ok(false)
+            }
+            KeyCode::Right => {
+                app.h_scroll += 4;
+                Ok(false)
+            }
+            _ => Ok(false),
+        },
+    }
+}
+
+fn render(f: &mut ratatui::Frame, app: &mut app::App) {
+    use app::Mode;
+    let area = f.area();
+    match app.mode {
+        Mode::Picker => {
+            let items: Vec<ListItem> = app
+                .files
+                .iter()
+                .map(|e| {
+                    ListItem::new(Line::from(vec![Span::raw(format!(
+                        "{}  ({}b)",
+                        e.name, e.size
+                    ))]))
+                })
+                .collect();
+            let list = List::new(items)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(" contextual — pick a file (Enter/q) "),
+                )
+                .highlight_style(Style::default().bg(Color::DarkGray));
+            if app.files.is_empty() {
+                let p = Paragraph::new("No files in this directory — press q to quit.")
+                    .block(Block::default().borders(Borders::ALL).title(" contextual "));
+                f.render_widget(p, area);
+            } else {
+                use ratatui::widgets::ListState;
+                let mut st = ListState::default();
+                st.select(Some(app.picker_index));
+                f.render_stateful_widget(list, area, &mut st);
+            }
+        }
+        Mode::Viewer => {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(1), Constraint::Length(2)])
+                .split(area);
+            let gutter = app.lines.len().to_string().len().max(4) + 1;
+            let text_w = (chunks[0].width as usize).saturating_sub(gutter + 1);
+            let display = viewer::build_display_lines(&app.lines, text_w.max(1), app.wrap);
+            let total = display.len();
+            let vh = chunks[0].height as usize;
+            app.scroll = viewer::clamp_scroll(app.scroll, total, vh);
+            let max_width = app
+                .lines
+                .iter()
+                .map(|l| l.chars().count())
+                .max()
+                .unwrap_or(0);
+            app.h_scroll = viewer::clamp_hscroll(app.h_scroll, max_width, text_w.max(1));
+            let end = (app.scroll + vh).min(total);
+            let mut text = Vec::new();
+            for (lidx, content) in display[app.scroll..end].iter() {
+                let shown = if app.wrap {
+                    content.clone()
+                } else {
+                    content
+                        .chars()
+                        .skip(app.h_scroll)
+                        .take(text_w.max(1))
+                        .collect()
+                };
+                text.push(Line::from(vec![
+                    Span::styled(
+                        format!("{:>width$} ", lidx + 1, width = gutter - 1),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                    Span::raw(shown),
+                ]));
+            }
+            let body = Paragraph::new(text).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(format!(" {} ", app.filename)),
+            );
+            f.render_widget(body, chunks[0]);
+            let mut s = format!(
+                " {}  {}/{}  wrap:{}  [w]rap [q]uit ",
+                app.filename,
+                app.scroll + 1,
+                total.max(1),
+                if app.wrap { "ON" } else { "OFF" }
+            );
+            if let Some(n) = &app.status_note {
+                s.push_str(n);
+            }
+            let bar = Paragraph::new(vec![
+                Line::from(Span::raw(s)),
+                Line::from(Span::styled(
+                    " ↑↓ scroll  PgUp/PgDn  g/G top/bottom  w wrap  ←→ h-scroll  q quit ",
+                    Style::default().fg(Color::Gray),
+                )),
+            ]);
+            f.render_widget(bar, chunks[1]);
+        }
+    }
 }

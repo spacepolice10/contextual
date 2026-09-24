@@ -39,6 +39,45 @@ impl App {
     }
 }
 
+use anyhow::{Context, Result};
+use std::path::Path;
+
+impl App {
+    pub fn new_picker(files: Vec<FileEntry>) -> Self {
+        Self {
+            mode: Mode::Picker,
+            files,
+            picker_index: 0,
+            lines: vec![],
+            filename: String::new(),
+            scroll: 0,
+            h_scroll: 0,
+            wrap: true,
+            status_note: None,
+            from_picker: false,
+        }
+    }
+    pub fn load_file(path: &Path, from_picker: bool) -> Result<Self> {
+        let bytes =
+            std::fs::read(path).with_context(|| format!("cannot open {}", path.display()))?;
+        let text = String::from_utf8_lossy(&bytes).to_string();
+        let lossy = String::from_utf8(bytes).is_err();
+        let lines: Vec<String> = text.lines().map(|s| s.to_string()).collect();
+        Ok(Self {
+            mode: Mode::Viewer,
+            files: vec![],
+            picker_index: 0,
+            lines,
+            filename: path.display().to_string(),
+            scroll: 0,
+            h_scroll: 0,
+            wrap: true,
+            status_note: lossy.then(|| "[lossy UTF-8]".to_string()),
+            from_picker,
+        })
+    }
+}
+
 // src/app.rs tests
 #[cfg(test)]
 mod tests {
