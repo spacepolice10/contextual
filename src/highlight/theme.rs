@@ -77,7 +77,10 @@ mod tests {
     #[test]
     fn known_captures_styled_both_themes() {
         for name in ["keyword", "string", "comment", "type", "function", "number"] {
-            let idx = super::super::HIGHLIGHT_NAMES.iter().position(|n| *n == name).unwrap();
+            let idx = super::super::HIGHLIGHT_NAMES
+                .iter()
+                .position(|n| *n == name)
+                .unwrap();
             assert_ne!(style(Theme::Dark, idx), Style::default(), "dark {name}");
             assert_ne!(style(Theme::Light, idx), Style::default(), "light {name}");
         }
