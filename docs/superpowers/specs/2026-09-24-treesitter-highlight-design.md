@@ -15,8 +15,9 @@ no config in v1. Ships with popular languages, decoupled from viewer logic.
   python (`py`), toml (`toml`), markdown (`md`).
 - Unknown extension → plain text render (current behavior). This is normal,
   not an error.
-- Theme: bundled dark + light pair. Background detection via OSC 11 query
-  with short timeout; any failure or timeout → Dark. No user config in v1.
+- Theme: bundled dark + light pair. Selection: `COLORFGBG` env heuristic when
+  present, else Dark. (OSC 11 query deferred: it needs nonblocking stdin reads
+  the std lib can't do portably — follow-up, not v1.) No user config in v1.
 - Cursor highlight paints on top of syntax spans (existing cursor logic).
 - Wrap works on highlighted spans (split by char boundary, styles inherited).
 - Deferred: runtime `.so` grammar plugins (documented as future work),
