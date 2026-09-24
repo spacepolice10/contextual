@@ -56,7 +56,9 @@ fn main() -> Result<()> {
         term.draw(|f| render(f, &mut app))?;
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(k) = event::read()? {
-                app.viewport_h = term.size()?.height.saturating_sub(3) as usize;
+                // Estimate of visible text rows: total height minus 2 status
+                // rows (line + bottom padding) minus 2 body border rows.
+                app.viewport_h = term.size()?.height.saturating_sub(4) as usize;
                 if handle(&mut app, k.code, k.modifiers)? {
                     break;
                 }
@@ -168,12 +170,17 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
+                        .border_style(Style::default().fg(Color::DarkGray))
                         .title(" contextual — pick a file (Enter/q) "),
                 )
                 .highlight_style(Style::default().bg(Color::DarkGray));
             if app.files.is_empty() {
-                let p = Paragraph::new("No files in this directory — press q to quit.")
-                    .block(Block::default().borders(Borders::ALL).title(" contextual "));
+                let p = Paragraph::new("No files in this directory — press q to quit.").block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(Color::DarkGray))
+                        .title(" contextual "),
+                );
                 f.render_widget(p, area);
             } else {
                 use ratatui::widgets::ListState;
@@ -188,10 +195,10 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
                 .constraints([Constraint::Min(1), Constraint::Length(2)])
                 .split(area);
             let gutter = app.lines.len().to_string().len().max(4) + 1;
-            let text_w = (chunks[0].width as usize).saturating_sub(gutter + 1);
+            let (text_w, vh) =
+                viewer::content_size(chunks[0].width as usize, chunks[0].height as usize, gutter);
             let display = viewer::build_display_lines(&app.lines, text_w.max(1), app.wrap);
             let total = display.len();
-            let vh = chunks[0].height as usize;
             app.viewport_h = vh;
             app.scroll = viewer::clamp_scroll(app.scroll, total, vh);
             let max_width = app
@@ -317,12 +324,12 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
             let body = Paragraph::new(text).block(
                 Block::default()
                     .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::DarkGray))
                     .title(format!(" {} ", app.filename)),
             );
             f.render_widget(body, chunks[0]);
             let mut s = format!(
-                " {}  {}/{}  Ln {},Col {}  wrap:{}  [w]rap [q]uit ",
-                app.filename,
+                " {}/{}  Ln {},Col {}  wrap:{} ",
                 app.scroll + 1,
                 total.max(1),
                 app.cursor_line + 1,
@@ -335,13 +342,7 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
             if app.lang.is_some() && app.highlighted.is_none() {
                 s.push_str("[no highlight]");
             }
-            let bar = Paragraph::new(vec![
-                Line::from(Span::raw(s)),
-                Line::from(Span::styled(
-                    " hjkl/arrows move cursor  PgUp/PgDn  g/G top/bottom  w wrap  q quit ",
-                    Style::default().fg(Color::Gray),
-                )),
-            ]);
+            let bar = Paragraph::new(vec![Line::from(Span::raw(s)), Line::from(Span::raw(""))]);
             f.render_widget(bar, chunks[1]);
         }
     }
