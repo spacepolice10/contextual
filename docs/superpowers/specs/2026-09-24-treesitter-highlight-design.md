@@ -34,9 +34,11 @@ fastest but syntect, not the tree-sitter standard the project chose).
 New module `src/highlight/`, nothing else restructured:
 - `src/highlight/mod.rs` — public interface only:
   - `detect(path: &Path) -> Option<Lang>` (extension + special filenames)
-  - `highlight_file(text: &str, lang: Lang, theme: Theme) -> Vec<Vec<Span<'static>>>`
+  - `highlight_file(text: &str, lang: Lang, theme: Theme) -> Option<Vec<Vec<Span<'static>>>>`
     (one entry per logical line; file-level pass so multi-line constructs
-    like block comments highlight correctly; caller slices the viewport)
+    like block comments highlight correctly; caller slices the viewport.
+    `None` when no grammar config or backend failure → caller renders plain
+    and shows `[no highlight]`.)
   - `enum Lang`, `enum Theme { Dark, Light }`
 - `src/highlight/langs.rs` — per-language `HighlightConfiguration`
   (queries taken from each grammar repo's `queries/` dir), built once behind
