@@ -1,6 +1,8 @@
 pub mod langs;
 pub mod theme;
 
+pub use theme::{detect_theme, style};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lang {
     Rust, Python, JavaScript, TypeScript, Tsx, Html, Ruby, Elixir, Php, C, Toml, Markdown,
@@ -21,7 +23,7 @@ pub const HIGHLIGHT_NAMES: &[&str] = &[
     "variable", "variable.builtin", "variable.parameter",
 ];
 
-/// Map a file path to a highlight language. Extension first, then special
+/// Map a file path to a highlight language. Special filenames first, then extension
 /// filenames (Gemfile/Rakefile). Unknown -> None (plain render).
 pub fn detect(path: &Path) -> Option<Lang> {
     if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
