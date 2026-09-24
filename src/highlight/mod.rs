@@ -140,6 +140,29 @@ pub fn highlight_file(text: &str, lang: Lang, theme: Theme) -> Vec<Vec<Span<'sta
     out
 }
 
+/// Char-based window over styled spans. Splits boundary spans, clones styles.
+/// Used for wrap chunks, h-scroll window, and cursor split (len 1).
+pub fn slice_spans(spans: &[Span<'static>], start: usize, len: usize) -> Vec<Span<'static>> {
+    let mut out = Vec::new();
+    let mut pos = 0;
+    let end = start + len;
+    for s in spans {
+        let chars: Vec<char> = s.content.chars().collect();
+        let s_end = pos + chars.len();
+        if s_end > start && pos < end {
+            let a = start.saturating_sub(pos);
+            let b = (end - pos).min(chars.len());
+            let part: String = chars[a..b].iter().collect();
+            out.push(Span::styled(part, s.style));
+        }
+        pos = s_end;
+        if pos >= end {
+            break;
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -249,5 +272,20 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert_eq!(flat, "a\nb");
+    }
+    #[test]
+    fn slice_spans_preserves_text_and_style() {
+        use ratatui::style::{Color, Style};
+        let st = Style::new().fg(Color::Red);
+        let spans = vec![Span::styled("ab", st), Span::raw("cdef".to_string())];
+        let got = slice_spans(&spans, 1, 3);
+        let flat: String = got.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(flat, "bcd");
+        assert_eq!(got[0].style, st);
+    }
+    #[test]
+    fn slice_spans_out_of_range_is_empty() {
+        let spans = vec![Span::raw("ab".to_string())];
+        assert!(slice_spans(&spans, 10, 5).is_empty());
     }
 }
