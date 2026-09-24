@@ -28,7 +28,11 @@ pub fn list_files(dir: &Path) -> Result<Vec<FileEntry>> {
             .file_name()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_default();
-        out.push(FileEntry { name, path, size: meta.len() });
+        out.push(FileEntry {
+            name,
+            path,
+            size: meta.len(),
+        });
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(out)

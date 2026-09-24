@@ -44,7 +44,10 @@ mod tests {
     }
     #[test]
     fn wrap_long_line_splits_on_chars() {
-        assert_eq!(wrap_line("abcdef", 2), vec!["ab".to_string(), "cd".to_string(), "ef".to_string()]);
+        assert_eq!(
+            wrap_line("abcdef", 2),
+            vec!["ab".to_string(), "cd".to_string(), "ef".to_string()]
+        );
     }
     #[test]
     fn wrap_zero_width_returns_whole() {
