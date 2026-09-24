@@ -12,7 +12,9 @@ no config in v1. Ships with popular languages, decoupled from viewer logic.
   filename), js (`js`, `jsx`), ts (`ts`), tsx (`tsx`), html (`html`, `htm`,
   `erb` inner HTML not split — whole file as ruby per `erb` rule above),
   elixir (`ex`, `exs`), php (`php`), c (`c`, `h`), plus base: rust (`rs`),
-  python (`py`), toml (`toml`), markdown (`md`).
+  python (`py`), toml (`toml`, via `tree-sitter-toml-ng`). Markdown (`md`)
+  renders plain in v1: upstream `tree-sitter-markdown` ships no queries and
+  links an incompatible runtime (follow-up when that changes).
 - Unknown extension → plain text render (current behavior). This is normal,
   not an error.
 - Theme: bundled dark + light pair. Selection: `COLORFGBG` env heuristic when
