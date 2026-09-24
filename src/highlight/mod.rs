@@ -1,7 +1,7 @@
 pub mod langs;
 pub mod theme;
 
-pub use theme::{detect_theme, style};
+pub use theme::detect_theme;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lang {

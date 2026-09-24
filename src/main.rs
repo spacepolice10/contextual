@@ -223,35 +223,77 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
             let end = (app.scroll + vh).min(total);
             let cursor_style = Style::default().bg(Color::DarkGray).fg(Color::White);
             let mut text = Vec::new();
+            // Chunk ordinal within the current logical line (wrap mode):
+            // display rows for one line are consecutive, so count repeats.
+            let mut prev_lidx: Option<usize> = None;
+            let mut chunk_k: usize = 0;
             for (drow, (lidx, content)) in display[app.scroll..end].iter().enumerate() {
                 let abs_row = app.scroll + drow;
                 let _ = abs_row;
+                match prev_lidx {
+                    Some(p) if p == *lidx => chunk_k += 1,
+                    _ => chunk_k = 0,
+                }
+                prev_lidx = Some(*lidx);
+                let w = text_w.max(1);
+                // Styled source for this logical line; .get() falls back to
+                // plain when highlight lines diverge from text lines.
+                let src = app.highlighted.as_ref().and_then(|h| h.get(*lidx));
                 let shown = if app.wrap {
                     content.clone()
                 } else {
-                    content
-                        .chars()
-                        .skip(app.h_scroll)
-                        .take(text_w.max(1))
-                        .collect()
+                    content.chars().skip(app.h_scroll).take(w).collect()
                 };
+                // Visible window as styled spans. Plain path stays
+                // byte-identical to the old `shown` string pipeline.
+                let windowed: Vec<Span> = match src {
+                    Some(spans) if app.wrap => highlight::slice_spans(spans, chunk_k * w, w),
+                    Some(spans) => highlight::slice_spans(spans, app.h_scroll, w),
+                    None => vec![Span::raw(shown.clone())],
+                };
+                let hl_row = src.is_some();
                 // Highlight the cursor cell on the cursor's display row.
                 let is_cursor_row = abs_row == cursor_row;
                 let body_span = if !is_cursor_row {
-                    vec![Span::raw(shown)]
+                    if hl_row {
+                        windowed
+                    } else {
+                        vec![Span::raw(shown)]
+                    }
                 } else {
-                    let chars: Vec<char> = shown.chars().collect();
                     // Column offset inside this visible chunk.
                     let rel_col = if app.wrap {
-                        let w = text_w.max(1);
                         app.cursor_col % w.max(1)
                     } else {
                         app.cursor_col.saturating_sub(app.h_scroll)
                     };
-                    if rel_col >= chars.len() {
-                        // Past end (or empty line): mark a space cell.
-                        vec![Span::raw(shown), Span::styled(" ", cursor_style)]
+                    let nchars: usize = if hl_row {
+                        windowed.iter().map(|s| s.content.chars().count()).sum()
                     } else {
+                        shown.chars().count()
+                    };
+                    if rel_col >= nchars {
+                        // Past end (or empty line): mark a space cell.
+                        let mut v = if hl_row {
+                            windowed
+                        } else {
+                            vec![Span::raw(shown)]
+                        };
+                        v.push(Span::styled(" ", cursor_style));
+                        v
+                    } else if hl_row {
+                        let mut before = highlight::slice_spans(&windowed, 0, rel_col);
+                        let mut cur = highlight::slice_spans(&windowed, rel_col, 1);
+                        for s in &mut cur {
+                            s.style = cursor_style;
+                        }
+                        let after =
+                            highlight::slice_spans(&windowed, rel_col + 1, nchars - rel_col - 1);
+                        before.extend(cur);
+                        before.extend(after);
+                        before
+                    } else {
+                        let chars: Vec<char> = shown.chars().collect();
                         let before: String = chars[..rel_col].iter().collect();
                         let cur: String = chars[rel_col..rel_col + 1].iter().collect();
                         let after: String = chars[rel_col + 1..].iter().collect();
@@ -286,6 +328,9 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
             );
             if let Some(n) = &app.status_note {
                 s.push_str(n);
+            }
+            if app.lang.is_some() && app.highlighted.is_none() {
+                s.push_str("[no highlight]");
             }
             let bar = Paragraph::new(vec![
                 Line::from(Span::raw(s)),

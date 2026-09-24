@@ -1,4 +1,6 @@
+use crate::highlight::{self, Lang};
 use crate::picker::{clamp_selection, FileEntry};
+use ratatui::text::Span;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -21,6 +23,11 @@ pub struct App {
     pub viewport_h: usize,
     pub cursor_line: usize,
     pub cursor_col: usize,
+    pub lang: Option<Lang>,
+    pub highlighted: Option<Vec<Vec<Span<'static>>>>,
+    // Theme used at load for `highlighted`; reserved for future re-highlight.
+    #[allow(dead_code)]
+    pub theme: highlight::Theme,
 }
 
 impl App {
@@ -86,6 +93,9 @@ impl App {
             viewport_h: 20,
             cursor_line: 0,
             cursor_col: 0,
+            lang: None,
+            highlighted: None,
+            theme: highlight::Theme::Dark,
         }
     }
     pub fn load_file(path: &Path, from_picker: bool) -> Result<Self> {
@@ -94,6 +104,9 @@ impl App {
         let text = String::from_utf8_lossy(&bytes).to_string();
         let lossy = String::from_utf8(bytes).is_err();
         let lines: Vec<String> = text.lines().map(|s| s.to_string()).collect();
+        let theme = highlight::detect_theme();
+        let lang = highlight::detect(path);
+        let highlighted = lang.map(|l| highlight::highlight_file(&text, l, theme));
         Ok(Self {
             mode: Mode::Viewer,
             files: vec![],
@@ -108,6 +121,9 @@ impl App {
             viewport_h: 20,
             cursor_line: 0,
             cursor_col: 0,
+            lang,
+            highlighted,
+            theme,
         })
     }
 }
@@ -131,6 +147,9 @@ mod tests {
             viewport_h: 20,
             cursor_line: 0,
             cursor_col: 0,
+            lang: None,
+            highlighted: None,
+            theme: crate::highlight::Theme::Dark,
         }
     }
     #[test]
@@ -169,5 +188,15 @@ mod tests {
         assert_eq!(a.cursor_col, 6);
         a.move_cursor_col(-100);
         assert_eq!(a.cursor_col, 0);
+    }
+    #[test]
+    fn load_file_detects_language() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("ctx_hl_test.rs");
+        std::fs::write(&path, "fn main() {}\n").unwrap();
+        let app = App::load_file(&path, false).unwrap();
+        assert_eq!(app.lang, Some(crate::highlight::Lang::Rust));
+        assert!(app.highlighted.is_some());
+        let _ = std::fs::remove_file(&path);
     }
 }
