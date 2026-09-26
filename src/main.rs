@@ -814,14 +814,19 @@ fn picker_preview_visible(width: usize) -> bool {
 /// Max preview bytes (alongside the `max_lines` cap at call sites).
 const PREVIEW_MAX_BYTES: usize = 100 * 1024;
 
-/// Capped lossy preview read: at most `PREVIEW_MAX_BYTES` then `max_lines`
-/// lines. Returns lines plus a `[binary preview]` note when NUL bytes are
-/// present. Never fails: unreadable files yield empty lines.
+/// Capped lossy preview read: at most `PREVIEW_MAX_BYTES` off disk, then
+/// `max_lines` lines. Returns lines plus a `[binary preview]` note when NUL
+/// bytes are present. Never fails: unreadable files yield empty lines.
+/// The byte cap binds at read time (not after) so selecting a huge file
+/// cannot stall the render loop.
 fn read_preview_lines(path: &std::path::Path, max_lines: usize) -> (Vec<String>, Option<String>) {
-    let bytes = std::fs::read(path).unwrap_or_default();
-    let capped = bytes.len().min(PREVIEW_MAX_BYTES);
-    let text = String::from_utf8_lossy(&bytes[..capped]).to_string();
-    let binary = bytes[..capped].contains(&0);
+    use std::io::Read;
+    let mut buf = Vec::new();
+    if let Ok(f) = std::fs::File::open(path) {
+        let _ = f.take(PREVIEW_MAX_BYTES as u64).read_to_end(&mut buf);
+    }
+    let text = String::from_utf8_lossy(&buf).to_string();
+    let binary = buf.contains(&0);
     let lines: Vec<String> = text.lines().take(max_lines).map(|s| s.to_string()).collect();
     let note = binary.then(|| "[binary preview]".to_string());
     (lines, note)
@@ -1815,8 +1820,32 @@ mod status_tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
     #[test]
-    fn picker_preview_binary_shows_note() {
+    fn picker_preview_read_is_byte_capped() {
+        // 300KB file with a huge line cap: only the 100KB byte cap may bind.
         let dir = std::env::temp_dir().join(format!(
+            "ctx_prevcap_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("wide.bin");
+        let chunk = "x".repeat(1023) + "\n";
+        let body = chunk.repeat(300);
+        assert!(body.len() >= 300 * 1024);
+        std::fs::write(&path, body.as_bytes()).unwrap();
+        let (lines, _) = read_preview_lines(&path, usize::MAX);
+        let total: usize = lines.iter().map(|l| l.len()).sum();
+        assert!(
+            total <= 100 * 1024,
+            "preview read {total} bytes without a bound"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn picker_preview_binary_shows_note() {        let dir = std::env::temp_dir().join(format!(
             "ctx_prevbin_{}_{}",
             std::process::id(),
             std::time::SystemTime::now()
