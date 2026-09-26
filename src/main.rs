@@ -412,7 +412,7 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
                 }
                 // Highlight the cursor cell on the cursor's display row.
                 let is_cursor_row = abs_row == cursor_row;
-                let mut body_span = if !is_cursor_row {
+                let body_span = if !is_cursor_row {
                     if hl_row {
                         windowed
                     } else {
