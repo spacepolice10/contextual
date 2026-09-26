@@ -284,6 +284,8 @@ mod handle_tests {
             handle(&mut a, KeyCode::Char(c), KeyModifiers::NONE).unwrap();
         }
         assert!(!a.search_matches.is_empty());
+        handle(&mut a, KeyCode::Enter, KeyModifiers::NONE).unwrap();
+        assert!(!a.searching);
         let first = a.search_idx;
         handle(&mut a, KeyCode::Char('n'), KeyModifiers::NONE).unwrap();
         assert_eq!(a.search_idx, (first + 1) % a.search_matches.len());

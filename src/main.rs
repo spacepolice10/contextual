@@ -93,62 +93,146 @@ fn handle(app: &mut app::App, code: KeyCode, mods: KeyModifiers) -> Result<bool>
             }
             _ => Ok(false),
         },
-        Mode::Viewer => match code {
-            KeyCode::Char('q') | KeyCode::Esc => {
-                if app.from_picker && code == KeyCode::Esc {
-                    let files = picker::list_files(std::path::Path::new("."))?;
-                    *app = app::App::new_picker(files);
+        Mode::Viewer => {
+            if app.searching {
+                match code {
+                    KeyCode::Esc => {
+                        app.cancel_search();
+                        return Ok(false);
+                    }
+                    KeyCode::Enter => {
+                        if !app.search_matches.is_empty() {
+                            let cur = (app.cursor_line, app.cursor_col);
+                            let pos = app
+                                .search_matches
+                                .iter()
+                                .position(|&m| m >= cur)
+                                .unwrap_or(0);
+                            app.search_idx = pos;
+                            let (l, c) = app.search_matches[pos];
+                            app.cursor_line = l;
+                            app.cursor_col = c;
+                            let row = crate::viewer::display_row_for_cursor(
+                                &app.lines, 80, app.wrap, l, c,
+                            );
+                            app.scroll = crate::search::scroll_for_match(
+                                row,
+                                app.scroll,
+                                app.viewport_h.max(1),
+                                2,
+                            );
+                        }
+                        app.commit_search();
+                        return Ok(false);
+                    }
+                    KeyCode::Backspace => {
+                        app.search_query.pop();
+                    }
+                    KeyCode::Char(c)
+                        if !mods.contains(KeyModifiers::CONTROL)
+                            && !mods.contains(KeyModifiers::ALT) =>
+                    {
+                        app.search_query.push(c);
+                    }
+                    _ => {}
+                }
+                app.search_matches = crate::search::find_matches(&app.lines, &app.search_query);
+                if !app.search_matches.is_empty() {
+                    let anchor = app
+                        .saved_cursor
+                        .unwrap_or((app.cursor_line, app.cursor_col));
+                    let pos = app
+                        .search_matches
+                        .iter()
+                        .position(|&m| m >= anchor)
+                        .unwrap_or(0);
+                    app.search_idx = pos;
+                    let (l, c) = app.search_matches[pos];
+                    app.cursor_line = l;
+                    app.cursor_col = c;
+                }
+                return Ok(false);
+            }
+            match code {
+                KeyCode::Char('q') | KeyCode::Esc => {
+                    if app.from_picker && code == KeyCode::Esc {
+                        let files = picker::list_files(std::path::Path::new("."))?;
+                        *app = app::App::new_picker(files);
+                        Ok(false)
+                    } else {
+                        Ok(true)
+                    }
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    app.move_cursor_line(1);
                     Ok(false)
-                } else {
-                    Ok(true)
                 }
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                app.move_cursor_line(1);
-                Ok(false)
-            }
-            KeyCode::Up | KeyCode::Char('k') => {
-                app.move_cursor_line(-1);
-                Ok(false)
-            }
-            KeyCode::PageDown => {
-                let vh = app.viewport_h;
-                app.move_cursor_line(vh as isize);
-                Ok(false)
-            }
-            KeyCode::PageUp => {
-                let vh = app.viewport_h;
-                app.move_cursor_line(-(vh as isize));
-                Ok(false)
-            }
-            KeyCode::Home | KeyCode::Char('g') => {
-                app.cursor_line = 0;
-                app.cursor_col = 0;
-                app.scroll = 0;
-                Ok(false)
-            }
-            KeyCode::End | KeyCode::Char('G') => {
-                if !app.lines.is_empty() {
-                    app.cursor_line = app.lines.len() - 1;
-                    app.cursor_col = app.lines[app.cursor_line].chars().count();
+                KeyCode::Up | KeyCode::Char('k') => {
+                    app.move_cursor_line(-1);
+                    Ok(false)
                 }
-                app.scroll = usize::MAX;
-                Ok(false)
+                KeyCode::PageDown => {
+                    let vh = app.viewport_h;
+                    app.move_cursor_line(vh as isize);
+                    Ok(false)
+                }
+                KeyCode::PageUp => {
+                    let vh = app.viewport_h;
+                    app.move_cursor_line(-(vh as isize));
+                    Ok(false)
+                }
+                KeyCode::Home | KeyCode::Char('g') => {
+                    app.cursor_line = 0;
+                    app.cursor_col = 0;
+                    app.scroll = 0;
+                    Ok(false)
+                }
+                KeyCode::End | KeyCode::Char('G') => {
+                    if !app.lines.is_empty() {
+                        app.cursor_line = app.lines.len() - 1;
+                        app.cursor_col = app.lines[app.cursor_line].chars().count();
+                    }
+                    app.scroll = usize::MAX;
+                    Ok(false)
+                }
+                KeyCode::Char('w') => {
+                    app.toggle_wrap();
+                    Ok(false)
+                }
+                KeyCode::Left | KeyCode::Char('h') => {
+                    app.move_cursor_col(-1);
+                    Ok(false)
+                }
+                KeyCode::Right | KeyCode::Char('l') => {
+                    app.move_cursor_col(1);
+                    Ok(false)
+                }
+                KeyCode::Char('/') => {
+                    app.start_search();
+                    Ok(false)
+                }
+                KeyCode::Char('n') => {
+                    if !app.search_matches.is_empty() {
+                        app.search_idx = (app.search_idx + 1) % app.search_matches.len();
+                        let (l, c) = app.search_matches[app.search_idx];
+                        app.cursor_line = l;
+                        app.cursor_col = c;
+                    }
+                    Ok(false)
+                }
+                KeyCode::Char('N') => {
+                    if !app.search_matches.is_empty() {
+                        app.search_idx = (app.search_idx + app.search_matches.len() - 1)
+                            % app.search_matches.len();
+                        let (l, c) = app.search_matches[app.search_idx];
+                        app.cursor_line = l;
+                        app.cursor_col = c;
+                    }
+                    Ok(false)
+                }
+                _ => Ok(false),
             }
-            KeyCode::Char('w') => {
-                app.toggle_wrap();
-                Ok(false)
-            }
-            KeyCode::Left | KeyCode::Char('h') => {
-                app.move_cursor_col(-1);
-                Ok(false)
-            }
-            KeyCode::Right | KeyCode::Char('l') => {
-                app.move_cursor_col(1);
-                Ok(false)
-            }
-            _ => Ok(false),
-        },
+        }
     }
 }
 
@@ -346,5 +430,36 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
             let bar = Paragraph::new(vec![Line::from(Span::raw(s)), Line::from(Span::raw(""))]);
             f.render_widget(bar, chunks[1]);
         }
+    }
+}
+
+#[cfg(test)]
+mod handle_tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyModifiers};
+    fn viewer() -> app::App {
+        app::App::load_file(std::path::Path::new("Cargo.toml"), false).unwrap()
+    }
+    #[test]
+    fn slash_enters_search_and_esc_restores() {
+        let mut a = viewer();
+        handle(&mut a, KeyCode::Char('/'), KeyModifiers::NONE).unwrap();
+        assert!(a.searching);
+        handle(&mut a, KeyCode::Esc, KeyModifiers::NONE).unwrap();
+        assert!(!a.searching);
+    }
+    #[test]
+    fn typing_runs_matcher_and_n_advances() {
+        let mut a = viewer();
+        handle(&mut a, KeyCode::Char('/'), KeyModifiers::NONE).unwrap();
+        for c in "package".chars() {
+            handle(&mut a, KeyCode::Char(c), KeyModifiers::NONE).unwrap();
+        }
+        assert!(!a.search_matches.is_empty());
+        handle(&mut a, KeyCode::Enter, KeyModifiers::NONE).unwrap();
+        assert!(!a.searching);
+        let first = a.search_idx;
+        handle(&mut a, KeyCode::Char('n'), KeyModifiers::NONE).unwrap();
+        assert_eq!(a.search_idx, (first + 1) % a.search_matches.len());
     }
 }
