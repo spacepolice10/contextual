@@ -1,5 +1,5 @@
 use crate::highlight::{self, Lang};
-use crate::picker::{clamp_selection, FileEntry};
+use crate::picker::{clamp_selection, filter_files, FileEntry, ScoredMatch};
 use crate::select::Selection;
 use ratatui::text::Span;
 
@@ -29,11 +29,27 @@ pub struct PendingComment {
     pub draft: String,
 }
 
+/// Fuzzy-picker input state: live query, ranked hits into `App::files`,
+/// keyboard selection, and preview scroll. `filtered` holds `ScoredMatch`
+/// values whose `entry_idx` points at `App::files`.
+/// Staged helper (render/keys land in Tasks 4-5); allow dead code until then.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Default)]
+pub struct PickerState {
+    pub query: String,
+    pub filtered: Vec<ScoredMatch>,
+    pub selected: usize,
+    pub preview_scroll: usize,
+    pub truncated: bool,
+}
+
 #[derive(Debug)]
 pub struct App {
     pub mode: Mode,
     pub files: Vec<FileEntry>,
     pub picker_index: usize,
+    /// Fuzzy state shadowing `files`/`picker_index` (migration lands in Task 6).
+    pub picker: PickerState,
     pub lines: Vec<String>,
     pub filename: String,
     pub scroll: usize,
@@ -82,6 +98,48 @@ impl App {
         let n = self.picker_index as isize + delta;
         let n = n.clamp(0, isize::MAX) as usize;
         self.picker_index = clamp_selection(n, self.files.len());
+    }
+    /// Re-rank `files` against the picker query. Keeps `selected` when it
+    /// still points inside the new list, else clamps to 0. Resets the
+    /// preview scroll when the selected file changes.
+    /// Staged helper (keys land in Task 4); allow dead code until then.
+    #[allow(dead_code)]
+    pub fn picker_recompute(&mut self) {
+        let before = self.picker_selected_entry();
+        self.picker.filtered = filter_files(&self.files, &self.picker.query);
+        if self.picker.selected >= self.picker.filtered.len() {
+            self.picker.selected = 0;
+        }
+        if self.picker_selected_entry() != before {
+            self.picker.preview_scroll = 0;
+        }
+    }
+    /// Move the fuzzy selection by `delta`, wrapping around. No-op when empty.
+    /// Staged helper (keys land in Task 4); allow dead code until then.
+    #[allow(dead_code)]
+    pub fn picker_move(&mut self, delta: isize) {
+        let len = self.picker.filtered.len();
+        if len == 0 {
+            self.picker.selected = 0;
+            return;
+        }
+        let next = (self.picker.selected as isize + delta).rem_euclid(len as isize);
+        self.picker.selected = next as usize;
+        self.picker.preview_scroll = 0;
+    }
+    /// Clear the query and restore the full list at selection 0.
+    /// Staged helper (keys land in Task 4); allow dead code until then.
+    #[allow(dead_code)]
+    pub fn picker_clear(&mut self) {
+        self.picker.query.clear();
+        self.picker_recompute();
+        self.picker.selected = 0;
+    }
+    fn picker_selected_entry(&self) -> Option<usize> {
+        self.picker
+            .filtered
+            .get(self.picker.selected)
+            .map(|m| m.entry_idx)
     }
     fn clamp_col(&self) -> usize {
         self.lines
@@ -291,10 +349,15 @@ use std::path::Path;
 
 impl App {
     pub fn new_picker(files: Vec<FileEntry>) -> Self {
+        let filtered = filter_files(&files, "");
         Self {
             mode: Mode::Picker,
             files,
             picker_index: 0,
+            picker: PickerState {
+                filtered,
+                ..PickerState::default()
+            },
             lines: vec![],
             filename: String::new(),
             scroll: 0,
@@ -335,6 +398,7 @@ impl App {
             mode: Mode::Viewer,
             files: vec![],
             picker_index: 0,
+            picker: PickerState::default(),
             lines,
             filename: path.display().to_string(),
             scroll: 0,
@@ -373,6 +437,7 @@ mod tests {
             mode: Mode::Viewer,
             files: vec![],
             picker_index: 0,
+            picker: PickerState::default(),
             lines: (0..n).map(|i| format!("line {i}")).collect(),
             filename: "t.txt".into(),
             scroll: 0,
@@ -464,6 +529,56 @@ mod tests {
         let mut a = viewer_app(0);
         a.lines = lines.iter().map(|s| s.to_string()).collect();
         a
+    }
+    fn picker_entry(path: &str) -> FileEntry {
+        FileEntry {
+            name: path.rsplit('/').next().unwrap_or(path).to_string(),
+            path: std::path::PathBuf::from(path),
+            size: 0,
+        }
+    }
+    fn picker_app() -> App {
+        App::new_picker(vec![
+            picker_entry("docs/notes.md"),
+            picker_entry("src/main.rs"),
+        ])
+    }
+    #[test]
+    fn picker_recompute_filters_and_clamps_selection() {
+        let mut a = picker_app();
+        assert_eq!(a.picker.filtered.len(), 2);
+        a.picker.query = "main".to_string();
+        a.picker.selected = 99;
+        a.picker_recompute();
+        assert_eq!(a.picker.filtered.len(), 1);
+        assert_eq!(a.picker.selected, 0);
+    }
+    #[test]
+    fn picker_move_wraps_around() {
+        let mut a = picker_app();
+        a.picker_move(1);
+        assert_eq!(a.picker.selected, 1);
+        a.picker_move(1);
+        assert_eq!(a.picker.selected, 0);
+        a.picker_move(-1);
+        assert_eq!(a.picker.selected, 1);
+        // Empty list: no-op, stays 0.
+        a.picker.query = "zzz-no-match".to_string();
+        a.picker_recompute();
+        assert!(a.picker.filtered.is_empty());
+        a.picker_move(1);
+        assert_eq!(a.picker.selected, 0);
+    }
+    #[test]
+    fn picker_clear_resets_query_and_selection() {
+        let mut a = picker_app();
+        a.picker.query = "main".to_string();
+        a.picker_recompute();
+        a.picker_move(0);
+        a.picker_clear();
+        assert!(a.picker.query.is_empty());
+        assert_eq!(a.picker.selected, 0);
+        assert_eq!(a.picker.filtered.len(), 2);
     }
     #[test]
     fn word_forward_basic() {
