@@ -67,6 +67,148 @@ impl App {
         let n = (self.cursor_col as isize + delta).clamp(0, isize::MAX) as usize;
         self.cursor_col = n.min(max);
     }
+    /// Char class for word motions: 0 = whitespace/EOL, 1 = word
+    /// (alphanumeric + `_`), 2 = punctuation. `big` collapses to
+    /// WORD semantics (whitespace vs non-whitespace).
+    fn word_class(c: char, big: bool) -> u8 {
+        if c.is_whitespace() {
+            0
+        } else if big || c.is_alphanumeric() || c == '_' {
+            1
+        } else {
+            2
+        }
+    }
+    fn class_at(&self, line: usize, col: usize, big: bool) -> u8 {
+        self.lines
+            .get(line)
+            .and_then(|l| l.chars().nth(col))
+            .map(|c| Self::word_class(c, big))
+            .unwrap_or(0)
+    }
+    fn line_len(&self, line: usize) -> usize {
+        self.lines.get(line).map(|l| l.chars().count()).unwrap_or(0)
+    }
+    /// Next char position (EOL counts as a whitespace step onto the next
+    /// line); `None` at end of file.
+    fn next_pos(&self, line: usize, col: usize) -> Option<(usize, usize)> {
+        if line >= self.lines.len() {
+            return None;
+        }
+        if col < self.line_len(line) {
+            Some((line, col + 1))
+        } else if line + 1 < self.lines.len() {
+            Some((line + 1, 0))
+        } else {
+            None
+        }
+    }
+    fn prev_pos(&self, line: usize, col: usize) -> Option<(usize, usize)> {
+        if line >= self.lines.len() {
+            return None;
+        }
+        if col > 0 {
+            Some((line, col - 1))
+        } else if line > 0 {
+            Some((line - 1, self.line_len(line - 1)))
+        } else {
+            None
+        }
+    }
+    fn set_cursor(&mut self, line: usize, col: usize) {
+        if self.lines.is_empty() {
+            self.cursor_line = 0;
+            self.cursor_col = 0;
+            return;
+        }
+        self.cursor_line = line.min(self.lines.len() - 1);
+        self.cursor_col = col.min(self.line_len(self.cursor_line));
+    }
+    /// Vim `w` / `W`: next word/WORD start (crosses lines).
+    pub fn move_word_forward(&mut self, big: bool) {
+        if self.lines.is_empty() {
+            return;
+        }
+        let mut line = self.cursor_line.min(self.lines.len() - 1);
+        let mut col = self.cursor_col.min(self.line_len(line));
+        let cur = self.class_at(line, col, big);
+        let mut pos = match self.next_pos(line, col) {
+            Some(p) => p,
+            None => return,
+        };
+        if cur != 0 && self.class_at(pos.0, pos.1, big) == cur {
+            while let Some(n) = self.next_pos(pos.0, pos.1) {
+                if self.class_at(n.0, n.1, big) != cur {
+                    pos = n;
+                    break;
+                }
+                pos = n;
+            }
+        }
+        while self.class_at(pos.0, pos.1, big) == 0 {
+            match self.next_pos(pos.0, pos.1) {
+                Some(n) => pos = n,
+                None => return,
+            }
+        }
+        (line, col) = pos;
+        self.set_cursor(line, col);
+    }
+    /// Vim `e` / `E`: end of current/next word/WORD (crosses lines).
+    pub fn move_word_end(&mut self, big: bool) {
+        if self.lines.is_empty() {
+            return;
+        }
+        let line = self.cursor_line.min(self.lines.len() - 1);
+        let col = self.cursor_col.min(self.line_len(line));
+        let mut pos = match self.next_pos(line, col) {
+            Some(p) => p,
+            None => return,
+        };
+        while self.class_at(pos.0, pos.1, big) == 0 {
+            match self.next_pos(pos.0, pos.1) {
+                Some(n) => pos = n,
+                None => return,
+            }
+        }
+        let cur = self.class_at(pos.0, pos.1, big);
+        while let Some(n) = self.next_pos(pos.0, pos.1) {
+            if self.class_at(n.0, n.1, big) != cur {
+                break;
+            }
+            pos = n;
+        }
+        self.set_cursor(pos.0, pos.1);
+    }
+    /// Vim `b` / `B`: previous word/WORD start (crosses lines).
+    pub fn move_word_back(&mut self, big: bool) {
+        if self.lines.is_empty() {
+            return;
+        }
+        let line = self.cursor_line.min(self.lines.len() - 1);
+        let col = self.cursor_col.min(self.line_len(line));
+        let mut pos = match self.prev_pos(line, col) {
+            Some(p) => p,
+            None => return,
+        };
+        while self.class_at(pos.0, pos.1, big) == 0 {
+            match self.prev_pos(pos.0, pos.1) {
+                Some(n) => pos = n,
+                None => {
+                    self.set_cursor(0, 0);
+                    return;
+                }
+            }
+        }
+        let cur = self.class_at(pos.0, pos.1, big);
+        while let Some(n) = self.prev_pos(pos.0, pos.1) {
+            if self.class_at(n.0, n.1, big) != cur {
+                break;
+            }
+            pos = n;
+        }
+        self.set_cursor(pos.0, pos.1);
+    }
     /// Keep cursor's display row inside [scroll, scroll+viewport).
     pub fn ensure_cursor_visible(&mut self, display_row: usize, viewport: usize) {
         if viewport == 0 {
@@ -262,5 +404,62 @@ mod tests {
         assert!(!a.searching);
         assert_eq!((a.cursor_line, a.cursor_col), (1, 2));
         assert_eq!(a.scroll, 4);
+    }
+    fn word_app(lines: &[&str]) -> App {
+        let mut a = viewer_app(0);
+        a.lines = lines.iter().map(|s| s.to_string()).collect();
+        a
+    }
+    #[test]
+    fn word_forward_basic() {
+        let mut a = word_app(&["foo bar"]);
+        a.move_word_forward(false);
+        assert_eq!((a.cursor_line, a.cursor_col), (0, 4));
+    }
+    #[test]
+    fn word_forward_stops_at_punctuation() {
+        let mut a = word_app(&["foo,bar"]);
+        a.move_word_forward(false);
+        assert_eq!((a.cursor_line, a.cursor_col), (0, 3));
+        a.move_word_forward(false);
+        assert_eq!((a.cursor_line, a.cursor_col), (0, 4));
+    }
+    #[test]
+    fn big_word_skips_punctuation_run() {
+        let mut a = word_app(&["foo,bar baz"]);
+        a.move_word_forward(true);
+        assert_eq!((a.cursor_line, a.cursor_col), (0, 8));
+    }
+    #[test]
+    fn word_end_basic() {
+        let mut a = word_app(&["foo bar"]);
+        a.move_word_end(false);
+        assert_eq!((a.cursor_line, a.cursor_col), (0, 2));
+        a.move_word_end(false);
+        assert_eq!((a.cursor_line, a.cursor_col), (0, 6));
+    }
+    #[test]
+    fn word_back_basic() {
+        let mut a = word_app(&["foo bar"]);
+        a.cursor_line = 0;
+        a.cursor_col = 4;
+        a.move_word_back(false);
+        assert_eq!((a.cursor_line, a.cursor_col), (0, 0));
+    }
+    #[test]
+    fn word_forward_crosses_lines() {
+        let mut a = word_app(&["foo", "bar"]);
+        a.cursor_line = 0;
+        a.cursor_col = 2;
+        a.move_word_forward(false);
+        assert_eq!((a.cursor_line, a.cursor_col), (1, 0));
+    }
+    #[test]
+    fn word_back_crosses_lines() {
+        let mut a = word_app(&["foo", "bar"]);
+        a.cursor_line = 1;
+        a.cursor_col = 0;
+        a.move_word_back(false);
+        assert_eq!((a.cursor_line, a.cursor_col), (0, 0));
     }
 }

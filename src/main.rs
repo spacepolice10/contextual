@@ -186,6 +186,46 @@ fn handle(app: &mut app::App, code: KeyCode, mods: KeyModifiers) -> Result<bool>
                     app.move_cursor_line(-(vh as isize));
                     Ok(false)
                 }
+                KeyCode::Char('f') | KeyCode::Char('F') if mods.contains(KeyModifiers::CONTROL) => {
+                    let half = (app.viewport_h / 2).max(1);
+                    app.move_cursor_line(half as isize);
+                    Ok(false)
+                }
+                KeyCode::Char('b') | KeyCode::Char('B') if mods.contains(KeyModifiers::CONTROL) => {
+                    let half = (app.viewport_h / 2).max(1);
+                    app.move_cursor_line(-(half as isize));
+                    Ok(false)
+                }
+                KeyCode::Char('d') | KeyCode::Char('D') if mods.contains(KeyModifiers::CONTROL) => {
+                    let half = (app.viewport_h / 2).max(1);
+                    app.move_cursor_line(half as isize);
+                    Ok(false)
+                }
+                KeyCode::Char('u') | KeyCode::Char('U') if mods.contains(KeyModifiers::CONTROL) => {
+                    let half = (app.viewport_h / 2).max(1);
+                    app.move_cursor_line(-(half as isize));
+                    Ok(false)
+                }
+                KeyCode::Char('0') => {
+                    app.cursor_col = 0;
+                    Ok(false)
+                }
+                KeyCode::Char('^') => {
+                    app.cursor_col = app
+                        .lines
+                        .get(app.cursor_line)
+                        .map(|l| l.chars().position(|c| !c.is_whitespace()).unwrap_or(0))
+                        .unwrap_or(0);
+                    Ok(false)
+                }
+                KeyCode::Char('$') => {
+                    app.cursor_col = app
+                        .lines
+                        .get(app.cursor_line)
+                        .map(|l| l.chars().count())
+                        .unwrap_or(0);
+                    Ok(false)
+                }
                 KeyCode::Home | KeyCode::Char('g') => {
                     app.cursor_line = 0;
                     app.cursor_col = 0;
@@ -200,8 +240,32 @@ fn handle(app: &mut app::App, code: KeyCode, mods: KeyModifiers) -> Result<bool>
                     app.scroll = usize::MAX;
                     Ok(false)
                 }
-                KeyCode::Char('w') => {
+                KeyCode::Char('w') | KeyCode::Char('W') if mods.contains(KeyModifiers::CONTROL) => {
                     app.toggle_wrap();
+                    Ok(false)
+                }
+                KeyCode::Char('w') => {
+                    app.move_word_forward(false);
+                    Ok(false)
+                }
+                KeyCode::Char('W') => {
+                    app.move_word_forward(true);
+                    Ok(false)
+                }
+                KeyCode::Char('e') => {
+                    app.move_word_end(false);
+                    Ok(false)
+                }
+                KeyCode::Char('E') => {
+                    app.move_word_end(true);
+                    Ok(false)
+                }
+                KeyCode::Char('b') if !mods.contains(KeyModifiers::CONTROL) => {
+                    app.move_word_back(false);
+                    Ok(false)
+                }
+                KeyCode::Char('B') if !mods.contains(KeyModifiers::CONTROL) => {
+                    app.move_word_back(true);
                     Ok(false)
                 }
                 KeyCode::Left | KeyCode::Char('h') => {
@@ -265,6 +329,39 @@ fn paint_search_ranges(spans: Vec<Span<'static>>, ranges: &[(usize, usize)]) -> 
         }
     }
     out
+}
+
+fn viewer_hint(searching: bool) -> &'static str {
+    if searching {
+        "Enter ok · Esc cancel"
+    } else {
+        "j/k move · ^F/^B/^D/^U half · w/b/e word · 0^$ line · / n/N · g/G · ^W wrap · q quit"
+    }
+}
+
+/// Left status + right-aligned hint padded to `width` chars (char count,
+/// not bytes). Hint keeps a subtle style; truncates on narrow widths.
+fn status_line(width: usize, left: &str, right: &str) -> Line<'static> {
+    let subtle = Style::default().fg(Color::DarkGray);
+    let lw = left.chars().count();
+    if width == 0 {
+        return Line::from(vec![Span::raw(left.to_string())]);
+    }
+    if lw >= width {
+        let t: String = left.chars().take(width).collect();
+        return Line::from(vec![Span::raw(t)]);
+    }
+    let rw = right.chars().count();
+    if lw + 1 + rw <= width {
+        let mut l = left.to_string();
+        l.push_str(&" ".repeat(width - lw - rw));
+        return Line::from(vec![Span::raw(l), Span::styled(right.to_string(), subtle)]);
+    }
+    let keep = width.saturating_sub(lw + 1);
+    let t: String = right.chars().take(keep).collect();
+    let mut l = left.to_string();
+    l.push(' ');
+    Line::from(vec![Span::raw(l), Span::styled(t, subtle)])
 }
 
 fn render(f: &mut ratatui::Frame, app: &mut app::App) {
@@ -514,7 +611,9 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
             if app.lang.is_some() && app.highlighted.is_none() {
                 s.push_str("[no highlight]");
             }
-            let bar = Paragraph::new(vec![Line::from(Span::raw(s)), Line::from(Span::raw(""))]);
+            let bar_w = chunks[1].width as usize;
+            let first = status_line(bar_w, &s, viewer_hint(app.searching));
+            let bar = Paragraph::new(vec![first, Line::from(Span::raw(""))]);
             f.render_widget(bar, chunks[1]);
         }
     }
@@ -569,5 +668,134 @@ mod handle_tests {
         let row = crate::viewer::display_row_for_cursor(&lines, 2, true, 0, 3);
         assert_eq!(row, 1);
         assert_eq!(crate::search::scroll_for_match(row, 0, 5, 2), 0);
+    }
+    #[test]
+    fn ctrl_f_half_page_down() {
+        let mut a = viewer();
+        a.viewport_h = 20;
+        a.cursor_line = 0;
+        handle(&mut a, KeyCode::Char('f'), KeyModifiers::CONTROL).unwrap();
+        assert_eq!(a.cursor_line, 10);
+    }
+    #[test]
+    fn ctrl_b_half_page_up() {
+        let mut a = viewer();
+        a.viewport_h = 20;
+        a.cursor_line = 20;
+        handle(&mut a, KeyCode::Char('b'), KeyModifiers::CONTROL).unwrap();
+        assert_eq!(a.cursor_line, 10);
+    }
+    #[test]
+    fn ctrl_d_half_page_down() {
+        let mut a = viewer();
+        a.viewport_h = 20;
+        a.cursor_line = 0;
+        handle(&mut a, KeyCode::Char('d'), KeyModifiers::CONTROL).unwrap();
+        assert_eq!(a.cursor_line, 10);
+    }
+    #[test]
+    fn ctrl_u_half_page_up() {
+        let mut a = viewer();
+        a.viewport_h = 20;
+        a.cursor_line = 20;
+        handle(&mut a, KeyCode::Char('u'), KeyModifiers::CONTROL).unwrap();
+        assert_eq!(a.cursor_line, 10);
+    }
+    #[test]
+    fn zero_moves_to_col_start() {
+        let mut a = viewer();
+        a.lines = vec!["hello".to_string()];
+        a.cursor_line = 0;
+        a.cursor_col = 3;
+        handle(&mut a, KeyCode::Char('0'), KeyModifiers::NONE).unwrap();
+        assert_eq!(a.cursor_col, 0);
+    }
+    #[test]
+    fn caret_moves_to_first_non_blank() {
+        let mut a = viewer();
+        a.lines = vec!["   hello".to_string()];
+        a.cursor_line = 0;
+        a.cursor_col = 7;
+        handle(&mut a, KeyCode::Char('^'), KeyModifiers::NONE).unwrap();
+        assert_eq!(a.cursor_col, 3);
+    }
+    #[test]
+    fn dollar_moves_to_line_end() {
+        let mut a = viewer();
+        a.lines = vec!["hello".to_string()];
+        a.cursor_line = 0;
+        a.cursor_col = 0;
+        handle(&mut a, KeyCode::Char('$'), KeyModifiers::NONE).unwrap();
+        assert_eq!(a.cursor_col, 5);
+    }
+    #[test]
+    fn ctrl_w_toggles_wrap() {
+        let mut a = viewer();
+        assert!(a.wrap);
+        handle(&mut a, KeyCode::Char('w'), KeyModifiers::CONTROL).unwrap();
+        assert!(!a.wrap);
+    }
+    #[test]
+    fn w_moves_to_next_word_start() {
+        let mut a = viewer();
+        a.lines = vec!["foo bar".to_string()];
+        a.cursor_line = 0;
+        a.cursor_col = 0;
+        handle(&mut a, KeyCode::Char('w'), KeyModifiers::NONE).unwrap();
+        assert_eq!((a.cursor_line, a.cursor_col), (0, 4));
+    }
+    #[test]
+    fn e_moves_to_word_end() {
+        let mut a = viewer();
+        a.lines = vec!["foo bar".to_string()];
+        a.cursor_line = 0;
+        a.cursor_col = 0;
+        handle(&mut a, KeyCode::Char('e'), KeyModifiers::NONE).unwrap();
+        assert_eq!((a.cursor_line, a.cursor_col), (0, 2));
+    }
+    #[test]
+    fn b_moves_to_prev_word_start() {
+        let mut a = viewer();
+        a.lines = vec!["foo bar".to_string()];
+        a.cursor_line = 0;
+        a.cursor_col = 4;
+        handle(&mut a, KeyCode::Char('b'), KeyModifiers::NONE).unwrap();
+        assert_eq!((a.cursor_line, a.cursor_col), (0, 0));
+    }
+}
+
+#[cfg(test)]
+mod status_tests {
+    use super::*;
+    #[test]
+    fn hint_lists_compact_navigation_keys() {
+        let h = viewer_hint(false);
+        for k in [
+            "j/k", "^F/^B", "^D/^U", "w/b/e", "0^$", "/ n/N", "g/G", "^W wrap", "q quit",
+        ] {
+            assert!(h.contains(k), "hint missing {k}: {h}");
+        }
+    }
+    #[test]
+    fn hint_searching_shows_confirm_cancel() {
+        let h = viewer_hint(true);
+        assert!(h.contains("Enter") && h.contains("Esc"), "unexpected: {h}");
+    }
+    #[test]
+    fn status_line_pads_right_hint_to_width_with_subtle_style() {
+        let line = status_line(20, "left", "right");
+        let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
+        assert_eq!(text.chars().count(), 20);
+        assert!(text.starts_with("left"));
+        assert!(text.ends_with("right"));
+        let right_style = line.spans.last().unwrap().style;
+        assert_eq!(right_style.fg, Some(Color::DarkGray));
+    }
+    #[test]
+    fn status_line_truncates_hint_on_narrow_width() {
+        let line = status_line(6, "left", "verylonghint");
+        let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
+        assert_eq!(text.chars().count(), 6);
+        assert!(text.starts_with("left"));
     }
 }
