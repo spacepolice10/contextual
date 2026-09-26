@@ -156,6 +156,14 @@ fn handle(app: &mut app::App, code: KeyCode, mods: KeyModifiers) -> Result<bool>
             }
             match code {
                 KeyCode::Char('q') | KeyCode::Esc => {
+                    // Visual/count state takes priority over search/quit.
+                    if code == KeyCode::Esc
+                        && (app.pending_count.is_some() || app.visual.is_some())
+                    {
+                        app.pending_count = None;
+                        app.visual = None;
+                        return Ok(false);
+                    }
                     // Committed search active: first Esc clears it (q still quits).
                     if code == KeyCode::Esc && !app.searching && !app.search_matches.is_empty() {
                         app.cancel_search();
@@ -170,48 +178,134 @@ fn handle(app: &mut app::App, code: KeyCode, mods: KeyModifiers) -> Result<bool>
                     }
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    app.move_cursor_line(1);
+                    let n = app.pending_count.take().unwrap_or(1) as isize;
+                    app.move_cursor_line(n);
                     Ok(false)
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
-                    app.move_cursor_line(-1);
+                    let n = app.pending_count.take().unwrap_or(1) as isize;
+                    app.move_cursor_line(-n);
                     Ok(false)
                 }
                 KeyCode::PageDown => {
-                    let vh = app.viewport_h;
-                    app.move_cursor_line(vh as isize);
+                    let n = match app.pending_count.take() {
+                        Some(c) => c as isize,
+                        None => app.viewport_h as isize,
+                    };
+                    app.move_cursor_line(n);
                     Ok(false)
                 }
                 KeyCode::PageUp => {
-                    let vh = app.viewport_h;
-                    app.move_cursor_line(-(vh as isize));
+                    let n = match app.pending_count.take() {
+                        Some(c) => c as isize,
+                        None => app.viewport_h as isize,
+                    };
+                    app.move_cursor_line(-n);
                     Ok(false)
                 }
                 KeyCode::Char('f') | KeyCode::Char('F') if mods.contains(KeyModifiers::CONTROL) => {
-                    let half = (app.viewport_h / 2).max(1);
-                    app.move_cursor_line(half as isize);
+                    let n = match app.pending_count.take() {
+                        Some(c) => c as isize,
+                        None => (app.viewport_h / 2).max(1) as isize,
+                    };
+                    app.move_cursor_line(n);
                     Ok(false)
                 }
                 KeyCode::Char('b') | KeyCode::Char('B') if mods.contains(KeyModifiers::CONTROL) => {
-                    let half = (app.viewport_h / 2).max(1);
-                    app.move_cursor_line(-(half as isize));
+                    let n = match app.pending_count.take() {
+                        Some(c) => c as isize,
+                        None => (app.viewport_h / 2).max(1) as isize,
+                    };
+                    app.move_cursor_line(-n);
                     Ok(false)
                 }
                 KeyCode::Char('d') | KeyCode::Char('D') if mods.contains(KeyModifiers::CONTROL) => {
-                    let half = (app.viewport_h / 2).max(1);
-                    app.move_cursor_line(half as isize);
+                    let n = match app.pending_count.take() {
+                        Some(c) => c as isize,
+                        None => (app.viewport_h / 2).max(1) as isize,
+                    };
+                    app.move_cursor_line(n);
                     Ok(false)
                 }
                 KeyCode::Char('u') | KeyCode::Char('U') if mods.contains(KeyModifiers::CONTROL) => {
-                    let half = (app.viewport_h / 2).max(1);
-                    app.move_cursor_line(-(half as isize));
+                    let n = match app.pending_count.take() {
+                        Some(c) => c as isize,
+                        None => (app.viewport_h / 2).max(1) as isize,
+                    };
+                    app.move_cursor_line(-n);
+                    Ok(false)
+                }
+                KeyCode::Char('v')
+                    if !mods.contains(KeyModifiers::CONTROL)
+                        && !mods.contains(KeyModifiers::ALT) =>
+                {
+                    app.pending_count = None;
+                    if !app.lines.is_empty() {
+                        use crate::select::{SelectKind, Selection};
+                        match app.visual {
+                            Some(sel) if sel.kind == SelectKind::Char => app.visual = None,
+                            Some(mut sel) => {
+                                sel.kind = SelectKind::Char;
+                                app.visual = Some(sel);
+                            }
+                            None => {
+                                app.visual = Some(Selection {
+                                    anchor: (app.cursor_line, app.cursor_col),
+                                    kind: SelectKind::Char,
+                                });
+                            }
+                        }
+                    }
+                    Ok(false)
+                }
+                KeyCode::Char('V')
+                    if !mods.contains(KeyModifiers::CONTROL)
+                        && !mods.contains(KeyModifiers::ALT) =>
+                {
+                    app.pending_count = None;
+                    if !app.lines.is_empty() {
+                        use crate::select::{SelectKind, Selection};
+                        match app.visual {
+                            Some(sel) if sel.kind == SelectKind::Line => app.visual = None,
+                            Some(mut sel) => {
+                                sel.kind = SelectKind::Line;
+                                app.visual = Some(sel);
+                            }
+                            None => {
+                                app.visual = Some(Selection {
+                                    anchor: (app.cursor_line, app.cursor_col),
+                                    kind: SelectKind::Line,
+                                });
+                            }
+                        }
+                    }
+                    Ok(false)
+                }
+                KeyCode::Char(c @ '1'..='9')
+                    if !mods.contains(KeyModifiers::CONTROL)
+                        && !mods.contains(KeyModifiers::ALT) =>
+                {
+                    let d = (c as u8 - b'0') as usize;
+                    let n = app.pending_count.unwrap_or(0).saturating_mul(10).saturating_add(d);
+                    app.pending_count = Some(n);
+                    Ok(false)
+                }
+                KeyCode::Char('0')
+                    if !mods.contains(KeyModifiers::CONTROL)
+                        && !mods.contains(KeyModifiers::ALT)
+                        && app.pending_count.is_some() =>
+                {
+                    let n = app.pending_count.unwrap_or(0).saturating_mul(10);
+                    app.pending_count = Some(n);
                     Ok(false)
                 }
                 KeyCode::Char('0') => {
+                    app.pending_count = None;
                     app.cursor_col = 0;
                     Ok(false)
                 }
                 KeyCode::Char('^') => {
+                    app.pending_count = None;
                     app.cursor_col = app
                         .lines
                         .get(app.cursor_line)
@@ -220,6 +314,7 @@ fn handle(app: &mut app::App, code: KeyCode, mods: KeyModifiers) -> Result<bool>
                     Ok(false)
                 }
                 KeyCode::Char('$') => {
+                    app.pending_count = None;
                     app.cursor_col = app
                         .lines
                         .get(app.cursor_line)
@@ -228,79 +323,134 @@ fn handle(app: &mut app::App, code: KeyCode, mods: KeyModifiers) -> Result<bool>
                     Ok(false)
                 }
                 KeyCode::Home | KeyCode::Char('g') => {
-                    app.cursor_line = 0;
-                    app.cursor_col = 0;
-                    app.scroll = 0;
+                    match app.pending_count.take() {
+                        Some(n) if !app.lines.is_empty() => {
+                            // Vim `N g`: jump to 1-based line N, clamped.
+                            let line = n.saturating_sub(1).min(app.lines.len() - 1);
+                            app.cursor_line = line;
+                            let max =
+                                app.lines[line].chars().count().min(app.cursor_col);
+                            app.cursor_col = max;
+                        }
+                        _ => {
+                            app.cursor_line = 0;
+                            app.cursor_col = 0;
+                            app.scroll = 0;
+                        }
+                    }
                     Ok(false)
                 }
                 KeyCode::End | KeyCode::Char('G') => {
-                    if !app.lines.is_empty() {
-                        app.cursor_line = app.lines.len() - 1;
-                        app.cursor_col = app.lines[app.cursor_line].chars().count();
+                    match app.pending_count.take() {
+                        Some(n) if !app.lines.is_empty() => {
+                            // Vim `N G`: jump to 1-based line N, clamped.
+                            let line = n.saturating_sub(1).min(app.lines.len() - 1);
+                            app.cursor_line = line;
+                            let max =
+                                app.lines[line].chars().count().min(app.cursor_col);
+                            app.cursor_col = max;
+                        }
+                        _ => {
+                            if !app.lines.is_empty() {
+                                app.cursor_line = app.lines.len() - 1;
+                                app.cursor_col = app.lines[app.cursor_line].chars().count();
+                            }
+                            app.scroll = usize::MAX;
+                        }
                     }
-                    app.scroll = usize::MAX;
                     Ok(false)
                 }
                 KeyCode::Char('w') | KeyCode::Char('W') if mods.contains(KeyModifiers::CONTROL) => {
+                    app.pending_count = None;
                     app.toggle_wrap();
                     Ok(false)
                 }
                 KeyCode::Char('w') => {
-                    app.move_word_forward(false);
+                    let n = app.pending_count.take().unwrap_or(1);
+                    for _ in 0..n {
+                        app.move_word_forward(false);
+                    }
                     Ok(false)
                 }
                 KeyCode::Char('W') => {
-                    app.move_word_forward(true);
+                    let n = app.pending_count.take().unwrap_or(1);
+                    for _ in 0..n {
+                        app.move_word_forward(true);
+                    }
                     Ok(false)
                 }
                 KeyCode::Char('e') => {
-                    app.move_word_end(false);
+                    let n = app.pending_count.take().unwrap_or(1);
+                    for _ in 0..n {
+                        app.move_word_end(false);
+                    }
                     Ok(false)
                 }
                 KeyCode::Char('E') => {
-                    app.move_word_end(true);
+                    let n = app.pending_count.take().unwrap_or(1);
+                    for _ in 0..n {
+                        app.move_word_end(true);
+                    }
                     Ok(false)
                 }
                 KeyCode::Char('b') if !mods.contains(KeyModifiers::CONTROL) => {
-                    app.move_word_back(false);
+                    let n = app.pending_count.take().unwrap_or(1);
+                    for _ in 0..n {
+                        app.move_word_back(false);
+                    }
                     Ok(false)
                 }
                 KeyCode::Char('B') if !mods.contains(KeyModifiers::CONTROL) => {
-                    app.move_word_back(true);
+                    let n = app.pending_count.take().unwrap_or(1);
+                    for _ in 0..n {
+                        app.move_word_back(true);
+                    }
                     Ok(false)
                 }
                 KeyCode::Left | KeyCode::Char('h') => {
-                    app.move_cursor_col(-1);
+                    let n = app.pending_count.take().unwrap_or(1) as isize;
+                    app.move_cursor_col(-n);
                     Ok(false)
                 }
                 KeyCode::Right | KeyCode::Char('l') => {
-                    app.move_cursor_col(1);
+                    let n = app.pending_count.take().unwrap_or(1) as isize;
+                    app.move_cursor_col(n);
                     Ok(false)
                 }
                 KeyCode::Char('/') => {
+                    app.pending_count = None;
                     app.start_search();
                     Ok(false)
                 }
                 KeyCode::Char('n') => {
-                    if !app.search_matches.is_empty() {
-                        app.search_idx = (app.search_idx + 1) % app.search_matches.len();
-                        let (l, c) = app.search_matches[app.search_idx];
-                        app.cursor_line = l;
-                        app.cursor_col = c;
+                    let n = app.pending_count.take().unwrap_or(1);
+                    for _ in 0..n {
+                        if !app.search_matches.is_empty() {
+                            app.search_idx = (app.search_idx + 1) % app.search_matches.len();
+                            let (l, c) = app.search_matches[app.search_idx];
+                            app.cursor_line = l;
+                            app.cursor_col = c;
+                        }
                     }
                     Ok(false)
                 }
                 KeyCode::Char('N') => {
-                    if !app.search_matches.is_empty() {
-                        app.search_idx = (app.search_idx + app.search_matches.len() - 1)
-                            % app.search_matches.len();
-                        let (l, c) = app.search_matches[app.search_idx];
-                        app.cursor_line = l;
-                        app.cursor_col = c;
+                    let n = app.pending_count.take().unwrap_or(1);
+                    for _ in 0..n {
+                        if !app.search_matches.is_empty() {
+                            app.search_idx = (app.search_idx + app.search_matches.len() - 1)
+                                % app.search_matches.len();
+                            let (l, c) = app.search_matches[app.search_idx];
+                            app.cursor_line = l;
+                            app.cursor_col = c;
+                        }
                     }
                     Ok(false)
                 }
-                _ => Ok(false),
+                _ => {
+                    app.pending_count = None;
+                    Ok(false)
+                }
             }
         }
     }
@@ -753,6 +903,62 @@ mod handle_tests {
         a.cursor_col = 0;
         handle(&mut a, KeyCode::Char('e'), KeyModifiers::NONE).unwrap();
         assert_eq!((a.cursor_line, a.cursor_col), (0, 2));
+    }
+    #[test]
+    fn visual_count_word_motion() {
+        let mut a = viewer();
+        a.lines = vec!["foo bar baz".to_string()];
+        handle(&mut a, KeyCode::Char('v'), KeyModifiers::NONE).unwrap();
+        for c in ['3', 'w'] { handle(&mut a, KeyCode::Char(c), KeyModifiers::NONE).unwrap(); }
+        assert_eq!((a.cursor_line, a.cursor_col), (0, 8));
+    }
+    #[test]
+    fn visual_5j_and_esc() {
+        let mut a = viewer();
+        a.lines = vec!["a".to_string(), "b".to_string(), "c".to_string(), "d".to_string(), "e".to_string(), "f".to_string()];
+        handle(&mut a, KeyCode::Char('v'), KeyModifiers::NONE).unwrap();
+        for c in ['5', 'j'] { handle(&mut a, KeyCode::Char(c), KeyModifiers::NONE).unwrap(); }
+        assert_eq!(a.cursor_line, 5);
+        handle(&mut a, KeyCode::Esc, KeyModifiers::NONE).unwrap();
+        assert!(a.visual.is_none());
+    }
+    #[test]
+    fn visual_anchor_stays_and_v_exits() {
+        let mut a = viewer();
+        a.lines = vec!["foo bar baz".to_string()];
+        handle(&mut a, KeyCode::Char('v'), KeyModifiers::NONE).unwrap();
+        let anchor = a.visual.unwrap().anchor;
+        assert_eq!(anchor, (0, 0));
+        handle(&mut a, KeyCode::Char('w'), KeyModifiers::NONE).unwrap();
+        assert_eq!(a.visual.unwrap().anchor, (0, 0));
+        assert_eq!((a.cursor_line, a.cursor_col), (0, 4));
+        // Same-kind `v` exits visual.
+        handle(&mut a, KeyCode::Char('v'), KeyModifiers::NONE).unwrap();
+        assert!(a.visual.is_none());
+    }
+    #[test]
+    fn bare_zero_goes_to_col_zero_and_ten_j_moves_ten() {
+        let mut a = viewer();
+        a.lines = (0..12).map(|i| format!("line {i}")).collect();
+        a.cursor_col = 3;
+        handle(&mut a, KeyCode::Char('0'), KeyModifiers::NONE).unwrap();
+        assert_eq!(a.cursor_col, 0);
+        assert!(a.pending_count.is_none());
+        for c in ['1', '0', 'j'] {
+            handle(&mut a, KeyCode::Char(c), KeyModifiers::NONE).unwrap();
+        }
+        assert_eq!(a.cursor_line, 10);
+        assert!(a.pending_count.is_none());
+    }
+    #[test]
+    fn esc_clears_pending_without_quitting() {
+        let mut a = viewer();
+        a.lines = vec!["a".to_string(), "b".to_string()];
+        handle(&mut a, KeyCode::Char('5'), KeyModifiers::NONE).unwrap();
+        assert_eq!(a.pending_count, Some(5));
+        let quit = handle(&mut a, KeyCode::Esc, KeyModifiers::NONE).unwrap();
+        assert!(!quit);
+        assert!(a.pending_count.is_none());
     }
     #[test]
     fn b_moves_to_prev_word_start() {

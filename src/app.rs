@@ -1,11 +1,32 @@
 use crate::highlight::{self, Lang};
 use crate::picker::{clamp_selection, FileEntry};
+use crate::select::Selection;
 use ratatui::text::Span;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Picker,
     Viewer,
+}
+
+/// Memory-only annotation on a text span (Task 3 fills, Task 4 lists).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Comment {
+    pub id: usize,
+    pub file: String,
+    pub start: (usize, usize),
+    pub end: (usize, usize),
+    pub snippet: String,
+    pub note: String,
+}
+
+/// Draft comment being typed (Task 3 fills).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingComment {
+    pub snippet: String,
+    pub start: (usize, usize),
+    pub end: (usize, usize),
+    pub draft: String,
 }
 
 #[derive(Debug)]
@@ -34,6 +55,19 @@ pub struct App {
     // Theme used at load for `highlighted`; reserved for future re-highlight.
     #[allow(dead_code)]
     pub theme: highlight::Theme,
+    /// Active visual selection; anchor end fixed, cursor is the live end.
+    pub visual: Option<Selection>,
+    /// Accumulated count prefix (`5j`, `v3w`); cleared after a motion.
+    pub pending_count: Option<usize>,
+    /// Draft comment input (Task 3).
+    #[allow(dead_code)]
+    pub commenting: Option<PendingComment>,
+    /// Saved comments, memory-only (Task 3 fills, Task 4 lists).
+    #[allow(dead_code)]
+    pub comments: Vec<Comment>,
+    /// Sidebar visibility (Task 4 renders).
+    #[allow(dead_code)]
+    pub show_sidebar: bool,
 }
 
 impl App {
@@ -277,6 +311,11 @@ impl App {
             lang: None,
             highlighted: None,
             theme: highlight::Theme::Dark,
+            visual: None,
+            pending_count: None,
+            commenting: None,
+            comments: Vec::new(),
+            show_sidebar: false,
         }
     }
     pub fn load_file(path: &Path, from_picker: bool) -> Result<Self> {
@@ -311,6 +350,11 @@ impl App {
             lang,
             highlighted,
             theme,
+            visual: None,
+            pending_count: None,
+            commenting: None,
+            comments: Vec::new(),
+            show_sidebar: false,
         })
     }
 }
@@ -343,6 +387,11 @@ mod tests {
             lang: None,
             highlighted: None,
             theme: crate::highlight::Theme::Dark,
+            visual: None,
+            pending_count: None,
+            commenting: None,
+            comments: Vec::new(),
+            show_sidebar: false,
         }
     }
     #[test]
