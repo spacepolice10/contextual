@@ -2,6 +2,7 @@ mod app;
 mod highlight;
 mod picker;
 mod search;
+mod select;
 mod viewer;
 
 use anyhow::{Context, Result};
