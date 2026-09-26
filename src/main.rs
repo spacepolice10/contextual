@@ -99,6 +99,87 @@ fn handle(app: &mut app::App, code: KeyCode, mods: KeyModifiers) -> Result<bool>
             _ => Ok(false),
         },
         Mode::Viewer => {
+            // Comment draft input: keystrokes edit `draft`, Enter saves to
+            // the memory buffer, Esc drops back to visual (selection kept).
+            if app.commenting.is_some() {
+                match code {
+                    KeyCode::Esc => {
+                        app.commenting = None;
+                        return Ok(false);
+                    }
+                    KeyCode::Enter => {
+                        if let Some(p) = app.commenting.take() {
+                            let id = app.comments.len();
+                            app.comments.push(app::Comment {
+                                id,
+                                file: app.filename.clone(),
+                                start: p.start,
+                                end: p.end,
+                                snippet: p.snippet,
+                                note: p.draft,
+                            });
+                        }
+                        app.visual = None;
+                        app.pending_count = None;
+                        return Ok(false);
+                    }
+                    KeyCode::Backspace => {
+                        if let Some(p) = app.commenting.as_mut() {
+                            p.draft.pop();
+                        }
+                        return Ok(false);
+                    }
+                    KeyCode::Char(c)
+                        if !mods.contains(KeyModifiers::CONTROL)
+                            && !mods.contains(KeyModifiers::ALT) =>
+                    {
+                        if let Some(p) = app.commenting.as_mut() {
+                            p.draft.push(c);
+                        }
+                        return Ok(false);
+                    }
+                    _ => return Ok(false),
+                }
+            }
+            // Text-object pending state: `i`/`a` in visual (below) armed
+            // this; a delimiter char resolves via `find_delim_pair`, any
+            // other key cancels back to normal handling.
+            if let Some(inner) = app.pending_object.take() {
+                let pair = match code {
+                    KeyCode::Char(c)
+                        if !mods.contains(KeyModifiers::CONTROL)
+                            && !mods.contains(KeyModifiers::ALT) =>
+                    {
+                        match c {
+                            '(' | ')' => Some(('(', ')')),
+                            '[' | ']' => Some(('[', ']')),
+                            '{' | '}' => Some(('{', '}')),
+                            '<' | '>' => Some(('<', '>')),
+                            '"' | '\'' | '`' => Some((c, c)),
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                };
+                if let Some((open, close)) = pair {
+                    let cursor = (app.cursor_line, app.cursor_col);
+                    match crate::select::find_delim_pair(&app.lines, cursor, open, close, inner)
+                    {
+                        Some((s, e)) => {
+                            if let Some(sel) = app.visual.as_mut() {
+                                sel.anchor = s;
+                            }
+                            app.cursor_line = e.0;
+                            app.cursor_col = e.1;
+                            app.status_note = None;
+                        }
+                        None => {
+                            app.status_note = Some("no match".to_string());
+                        }
+                    }
+                    return Ok(false);
+                }
+            }
             if app.searching {
                 match code {
                     KeyCode::Esc => {
@@ -445,6 +526,39 @@ fn handle(app: &mut app::App, code: KeyCode, mods: KeyModifiers) -> Result<bool>
                 KeyCode::Char('/') => {
                     app.pending_count = None;
                     app.start_search();
+                    Ok(false)
+                }
+                KeyCode::Char(c @ ('i' | 'a'))
+                    if !mods.contains(KeyModifiers::CONTROL)
+                        && !mods.contains(KeyModifiers::ALT)
+                        && app.visual.is_some() =>
+                {
+                    // Vim `i`/`a` text-object: arm delimiter pending state;
+                    // the next delimiter key selects via `find_delim_pair`.
+                    app.pending_count = None;
+                    app.pending_object = Some(c == 'i');
+                    Ok(false)
+                }
+                KeyCode::Enter => {
+                    // With an active selection, stash the snippet + span and
+                    // open the draft input; with no visual this is a noop
+                    // (also covers the empty-file case, where `v` never arms).
+                    app.pending_count = None;
+                    if let Some(sel) = app.visual {
+                        if !app.lines.is_empty() {
+                            let cursor = (app.cursor_line, app.cursor_col);
+                            let (start, end) =
+                                crate::select::normalize(sel.anchor, cursor, sel.kind);
+                            let snippet =
+                                crate::select::extract_text(&app.lines, start, end, sel.kind);
+                            app.commenting = Some(app::PendingComment {
+                                snippet,
+                                start,
+                                end,
+                                draft: String::new(),
+                            });
+                        }
+                    }
                     Ok(false)
                 }
                 KeyCode::Char('n') => {
@@ -1029,6 +1143,74 @@ mod handle_tests {
         a.cursor_col = 4;
         handle(&mut a, KeyCode::Char('b'), KeyModifiers::NONE).unwrap();
         assert_eq!((a.cursor_line, a.cursor_col), (0, 0));
+    }
+    #[test]
+    fn vi_quote_then_enter_saves_comment() {
+        let mut a = viewer();
+        a.lines = vec!["a \"hi\" b".to_string()];
+        a.cursor_col = 4;
+        handle(&mut a, KeyCode::Char('v'), KeyModifiers::NONE).unwrap();
+        for c in ['i', '"'] { handle(&mut a, KeyCode::Char(c), KeyModifiers::NONE).unwrap(); }
+        handle(&mut a, KeyCode::Enter, KeyModifiers::NONE).unwrap();
+        assert!(a.commenting.is_some());
+        for c in "ok".chars() { handle(&mut a, KeyCode::Char(c), KeyModifiers::NONE).unwrap(); }
+        handle(&mut a, KeyCode::Enter, KeyModifiers::NONE).unwrap();
+        assert_eq!(a.comments.len(), 1);
+        assert_eq!(a.comments[0].snippet, "hi");
+    }
+    #[test]
+    fn delim_miss_keeps_selection() {
+        let mut a = viewer();
+        a.lines = vec!["no quotes".to_string()];
+        handle(&mut a, KeyCode::Char('v'), KeyModifiers::NONE).unwrap();
+        for c in ['i', '"'] { handle(&mut a, KeyCode::Char(c), KeyModifiers::NONE).unwrap(); }
+        assert!(a.visual.is_some());
+        assert!(a.commenting.is_none());
+        assert_eq!(a.status_note.as_deref(), Some("no match"));
+    }
+    #[test]
+    fn enter_noop_without_visual_and_on_empty_file() {
+        let mut a = viewer();
+        a.lines = vec!["hello".to_string()];
+        handle(&mut a, KeyCode::Enter, KeyModifiers::NONE).unwrap();
+        assert!(a.commenting.is_none());
+        assert!(a.comments.is_empty());
+        // Empty file: `v` never arms visual, so `Enter` stays a noop.
+        a.lines = vec![];
+        handle(&mut a, KeyCode::Char('v'), KeyModifiers::NONE).unwrap();
+        assert!(a.visual.is_none());
+        handle(&mut a, KeyCode::Enter, KeyModifiers::NONE).unwrap();
+        assert!(a.commenting.is_none());
+        assert!(a.comments.is_empty());
+    }
+    #[test]
+    fn empty_note_is_saved_with_file_ref() {
+        let mut a = viewer();
+        a.lines = vec!["hello".to_string()];
+        handle(&mut a, KeyCode::Char('v'), KeyModifiers::NONE).unwrap();
+        handle(&mut a, KeyCode::Char('e'), KeyModifiers::NONE).unwrap();
+        handle(&mut a, KeyCode::Enter, KeyModifiers::NONE).unwrap();
+        assert!(a.commenting.is_some());
+        // No typing: empty draft still saves.
+        handle(&mut a, KeyCode::Enter, KeyModifiers::NONE).unwrap();
+        assert_eq!(a.comments.len(), 1);
+        assert_eq!(a.comments[0].note, "");
+        assert_eq!(a.comments[0].file, a.filename);
+        assert!(a.visual.is_none());
+        assert!(a.commenting.is_none());
+    }
+    #[test]
+    fn esc_drops_commenting_back_to_visual() {
+        let mut a = viewer();
+        a.lines = vec!["hello".to_string()];
+        handle(&mut a, KeyCode::Char('v'), KeyModifiers::NONE).unwrap();
+        handle(&mut a, KeyCode::Enter, KeyModifiers::NONE).unwrap();
+        assert!(a.commenting.is_some());
+        let quit = handle(&mut a, KeyCode::Esc, KeyModifiers::NONE).unwrap();
+        assert!(!quit);
+        assert!(a.commenting.is_none());
+        assert!(a.visual.is_some());
+        assert!(a.comments.is_empty());
     }
 }
 

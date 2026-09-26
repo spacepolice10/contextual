@@ -59,6 +59,9 @@ pub struct App {
     pub visual: Option<Selection>,
     /// Accumulated count prefix (`5j`, `v3w`); cleared after a motion.
     pub pending_count: Option<usize>,
+    /// Pending `i`/`a` text-object in visual (`Some(true)` = inner `i`,
+    /// `Some(false)` = around `a`); consumed by the next delimiter key.
+    pub pending_object: Option<bool>,
     /// Draft comment input (Task 3).
     #[allow(dead_code)]
     pub commenting: Option<PendingComment>,
@@ -313,6 +316,7 @@ impl App {
             theme: highlight::Theme::Dark,
             visual: None,
             pending_count: None,
+            pending_object: None,
             commenting: None,
             comments: Vec::new(),
             show_sidebar: false,
@@ -352,6 +356,7 @@ impl App {
             theme,
             visual: None,
             pending_count: None,
+            pending_object: None,
             commenting: None,
             comments: Vec::new(),
             show_sidebar: false,
@@ -389,6 +394,7 @@ mod tests {
             theme: crate::highlight::Theme::Dark,
             visual: None,
             pending_count: None,
+            pending_object: None,
             commenting: None,
             comments: Vec::new(),
             show_sidebar: false,
