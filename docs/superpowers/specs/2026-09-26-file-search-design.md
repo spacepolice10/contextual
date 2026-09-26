@@ -42,7 +42,7 @@ Keys (Viewer):
 
 ## Viewport scroll rule
 - All math in display rows (wrap-expanded), via `display_row_for_cursor`.
-- `margin = 2`, saturates to 0 when `vh < 5`.
+- `margin = 2`; effective margin `m = if vh < 2*margin+1 { 0 } else { margin }` (so `m=0` when `vh<5`); `vh==0` leaves scroll untouched.
 - No scroll if match row in `[scroll+margin, scroll+vh-1-margin]`.
 - Else minimal scroll: above/near-top → `scroll = match_row - margin`; below/near-bottom → `scroll = match_row - vh + 1 + margin`; then `clamp_scroll`.
 - Horizontal (`h_scroll`) unchanged: existing follow-cursor logic applies; search adds nothing.

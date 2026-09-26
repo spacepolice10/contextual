@@ -40,7 +40,7 @@ pub fn scroll_for_match(match_row: usize, scroll: usize, vh: usize, margin: usiz
     if vh == 0 {
         return scroll;
     }
-    let m = margin.min((vh / 2).saturating_sub(1));
+    let m = if vh < 2 * margin + 1 { 0 } else { margin };
     let top = scroll.saturating_add(m);
     let bottom = scroll.saturating_add(vh).saturating_sub(m);
     let result = if match_row >= top && match_row < bottom {
