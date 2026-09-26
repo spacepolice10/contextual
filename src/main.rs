@@ -586,6 +586,14 @@ fn handle(app: &mut app::App, code: KeyCode, mods: KeyModifiers) -> Result<bool>
                     }
                     Ok(false)
                 }
+                KeyCode::Char('C')
+                    if !mods.contains(KeyModifiers::CONTROL)
+                        && !mods.contains(KeyModifiers::ALT) =>
+                {
+                    app.pending_count = None;
+                    app.show_sidebar = !app.show_sidebar;
+                    Ok(false)
+                }
                 _ => {
                     app.pending_count = None;
                     Ok(false)
@@ -598,7 +606,25 @@ fn handle(app: &mut app::App, code: KeyCode, mods: KeyModifiers) -> Result<bool>
 /// Repaint exact-match ranges with vim-like Search style (yellow bg).
 /// Ranges are chunk-relative char offsets into the concatenated spans.
 fn paint_search_ranges(spans: Vec<Span<'static>>, ranges: &[(usize, usize)]) -> Vec<Span<'static>> {
-    let bg = Style::default().bg(Color::Yellow).fg(Color::Black);
+    paint_ranges(spans, ranges, Style::default().bg(Color::Yellow).fg(Color::Black))
+}
+
+/// Repaint selection ranges with vim-like Visual style (blue bg).
+/// Same chunk-relative contract as [`paint_search_ranges`].
+fn paint_selection_ranges(
+    spans: Vec<Span<'static>>,
+    ranges: &[(usize, usize)],
+) -> Vec<Span<'static>> {
+    paint_ranges(spans, ranges, Style::default().bg(Color::Blue).fg(Color::White))
+}
+
+/// Shared cell repaint for chunk-relative ranges: explode spans to styled
+/// chars, overwrite the style in each range, re-merge adjacent equals.
+fn paint_ranges(
+    spans: Vec<Span<'static>>,
+    ranges: &[(usize, usize)],
+    style: Style,
+) -> Vec<Span<'static>> {
     let mut cells: Vec<(char, Style)> = Vec::new();
     for s in &spans {
         for c in s.content.chars() {
@@ -607,7 +633,7 @@ fn paint_search_ranges(spans: Vec<Span<'static>>, ranges: &[(usize, usize)]) -> 
     }
     for &(a, b) in ranges {
         for i in a.min(cells.len())..b.min(cells.len()) {
-            cells[i].1 = bg;
+            cells[i].1 = style;
         }
     }
     let mut out: Vec<Span<'static>> = Vec::new();
@@ -625,8 +651,66 @@ fn viewer_hint(searching: bool) -> &'static str {
     if searching {
         "Enter ok · Esc cancel"
     } else {
-        "j/k move · ^F/^B/^D/^U half · w/b/e word · 0^$ line · / n/N · g/G · ^W wrap · q quit"
+        "j/k move · ^F/^B/^D/^U half · w/b/e word · 0^$ line · / n/N · g/G · ^W wrap · v/V select · Enter comment · C sidebar · q quit"
     }
+}
+
+/// Status mode tag for an active visual selection (`""` when none).
+/// Commenting input covers its own `Comment…` tag via [`comment_prompt`].
+fn visual_tag(visual: Option<crate::select::Selection>) -> &'static str {
+    match visual {
+        Some(s) if s.kind == crate::select::SelectKind::Line => "--VISUAL LINE--",
+        Some(_) => "--VISUAL--",
+        None => "",
+    }
+}
+
+/// Trailing status count (`[n comments]`), shown once comments exist.
+fn comments_tag(n: usize) -> String {
+    format!(" [{n} comments]")
+}
+
+/// Status row 1 while typing a note: `Comment on <file:line>: <draft>`
+/// with a 1-based line; the block cursor cell is appended by `render`.
+fn comment_prompt(file: &str, line: usize, draft: &str) -> String {
+    format!("Comment on {file}:{line}: {draft}")
+}
+
+/// Sidebar rows for the comments panel: `file: sL:sC → eL:eC snippet | note`
+/// with 1-based positions. Snippets flatten to one row and truncate to the
+/// first 40 chars + `…`. Shows the last `height` comments (no scroll in v1).
+fn sidebar_lines(app: &app::App, height: usize) -> Vec<Line<'static>> {
+    if app.comments.is_empty() {
+        return vec![Line::from(Span::raw(
+            "No comments — v select, Enter comment",
+        ))];
+    }
+    let n = height.max(1).min(app.comments.len());
+    app.comments[app.comments.len() - n..]
+        .iter()
+        .map(|c| {
+            let flat: String = c
+                .snippet
+                .replace('\r', "")
+                .replace('\n', " ")
+                .chars()
+                .collect();
+            let snip = if flat.chars().count() > 40 {
+                format!("{}…", flat.chars().take(40).collect::<String>())
+            } else {
+                flat
+            };
+            Line::from(Span::raw(format!(
+                "{}: {}:{} → {}:{} {snip} | {}",
+                c.file,
+                c.start.0 + 1,
+                c.start.1 + 1,
+                c.end.0 + 1,
+                c.end.1 + 1,
+                c.note,
+            )))
+        })
+        .collect()
 }
 
 /// Left status + right-aligned hint padded to `width` chars (char count,
@@ -697,9 +781,19 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
                 .direction(Direction::Vertical)
                 .constraints([Constraint::Min(1), Constraint::Length(2)])
                 .split(area);
+            // Sidebar takes a fixed 35-col strip when toggled (`[text | 35]`).
+            let (text_area, side_area) = if app.show_sidebar {
+                let h = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([Constraint::Min(1), Constraint::Length(35)])
+                    .split(chunks[0]);
+                (h[0], Some(h[1]))
+            } else {
+                (chunks[0], None)
+            };
             let gutter = app.lines.len().to_string().len().max(4) + 1;
             let (text_w, vh) =
-                viewer::content_size(chunks[0].width as usize, chunks[0].height as usize, gutter);
+                viewer::content_size(text_area.width as usize, text_area.height as usize, gutter);
             let display = viewer::build_display_lines(&app.lines, text_w.max(1), app.wrap);
             let total = display.len();
             app.viewport_h = vh;
@@ -797,14 +891,36 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
                         }
                     }
                 }
+                // Paint the visual selection blue (vim-like Visual). Runs
+                // after search paint so selection wins there, but before
+                // the cursor split below so the cursor cell still wins.
+                if let Some(sel) = app.visual {
+                    let cursor = (app.cursor_line, app.cursor_col);
+                    let (mut s0, mut e0) =
+                        crate::select::normalize(sel.anchor, cursor, sel.kind);
+                    if sel.kind == crate::select::SelectKind::Line {
+                        s0 = (s0.0, 0);
+                        e0 = (
+                            e0.0,
+                            app.lines
+                                .get(e0.0)
+                                .map(|l| l.chars().count())
+                                .unwrap_or(0),
+                        );
+                    }
+                    let coff = if app.wrap { chunk_k * w } else { app.h_scroll };
+                    let nchars: usize =
+                        windowed.iter().map(|s| s.content.chars().count()).sum();
+                    let ranges =
+                        crate::select::selection_chunks(s0, e0, *lidx, coff, nchars);
+                    if !ranges.is_empty() {
+                        windowed = paint_selection_ranges(windowed, &ranges);
+                    }
+                }
                 // Highlight the cursor cell on the cursor's display row.
                 let is_cursor_row = abs_row == cursor_row;
                 let body_span = if !is_cursor_row {
-                    if hl_row {
-                        windowed
-                    } else {
-                        vec![Span::raw(shown)]
-                    }
+                    windowed
                 } else {
                     // Column offset inside this visible chunk.
                     let rel_col = if app.wrap {
@@ -841,15 +957,30 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
                         before.extend(after);
                         before
                     } else {
-                        let chars: Vec<char> = shown.chars().collect();
-                        let before: String = chars[..rel_col].iter().collect();
-                        let cur: String = chars[rel_col..rel_col + 1].iter().collect();
-                        let after: String = chars[rel_col + 1..].iter().collect();
-                        vec![
-                            Span::raw(before),
-                            Span::styled(cur, cursor_style),
-                            Span::raw(after),
-                        ]
+                        // Plain path: split the (possibly search/selection
+                        // painted) `windowed` spans so paint survives and
+                        // only the cursor cell is restyled.
+                        let mut cells: Vec<(char, Style)> = Vec::new();
+                        for sp in &windowed {
+                            for c in sp.content.chars() {
+                                cells.push((c, sp.style));
+                            }
+                        }
+                        let mut v: Vec<Span> = Vec::new();
+                        for (i, (c, st)) in cells.into_iter().enumerate() {
+                            let st = if i == rel_col { cursor_style } else { st };
+                            let t = c.to_string();
+                            match v.last_mut() {
+                                Some(last) if last.style == st => {
+                                    last.content.to_mut().push_str(&t);
+                                }
+                                _ => v.push(Span::styled(t, st)),
+                            }
+                        }
+                        if rel_col >= nchars {
+                            v.push(Span::styled(" ", cursor_style));
+                        }
+                        v
                     }
                 };
                 let mut spans = vec![Span::styled(
@@ -865,7 +996,18 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
                     .border_style(Style::default().fg(Color::DarkGray))
                     .title(format!(" {} ", app.filename)),
             );
-            f.render_widget(body, chunks[0]);
+            f.render_widget(body, text_area);
+            if let Some(side) = side_area {
+                let inner_h = side.height.saturating_sub(2) as usize;
+                let side_rows = sidebar_lines(app, inner_h);
+                let panel = Paragraph::new(side_rows).block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(Color::DarkGray))
+                        .title(" comments (C) "),
+                );
+                f.render_widget(panel, side);
+            }
             let mut s = format!(
                 " {}/{}  Ln {},Col {}  wrap:{} ",
                 app.scroll + 1,
@@ -901,9 +1043,42 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
             if app.lang.is_some() && app.highlighted.is_none() {
                 s.push_str("[no highlight]");
             }
+            let tag = visual_tag(app.visual);
+            if !tag.is_empty() {
+                s.push(' ');
+                s.push_str(tag);
+            }
+            if !app.comments.is_empty() {
+                s.push_str(&comments_tag(app.comments.len()));
+            }
             let bar_w = chunks[1].width as usize;
-            let first = status_line(bar_w, &s, viewer_hint(app.searching));
-            let bar = Paragraph::new(vec![first, Line::from(Span::raw(""))]);
+            // While typing a note, row 1 is the input
+            // (`Comment on <file:line>: <draft>▌`) and row 2 the confirm
+            // hint; otherwise row 1 is the status line.
+            let rows = if let Some(p) = &app.commenting {
+                let mut first = vec![Span::raw(comment_prompt(
+                    &app.filename,
+                    p.start.0 + 1,
+                    &p.draft,
+                ))];
+                first.push(Span::styled(
+                    "▌",
+                    Style::default().bg(Color::DarkGray).fg(Color::White),
+                ));
+                vec![
+                    Line::from(first),
+                    Line::from(Span::styled(
+                        "Enter save · Esc cancel",
+                        Style::default().fg(Color::DarkGray),
+                    )),
+                ]
+            } else {
+                vec![
+                    status_line(bar_w, &s, viewer_hint(app.searching)),
+                    Line::from(Span::raw("")),
+                ]
+            };
+            let bar = Paragraph::new(rows);
             f.render_widget(bar, chunks[1]);
         }
     }
@@ -1200,6 +1375,15 @@ mod handle_tests {
         assert!(a.commenting.is_none());
     }
     #[test]
+    fn c_toggles_sidebar() {
+        let mut a = viewer();
+        assert!(!a.show_sidebar);
+        handle(&mut a, KeyCode::Char('C'), KeyModifiers::NONE).unwrap();
+        assert!(a.show_sidebar);
+        handle(&mut a, KeyCode::Char('C'), KeyModifiers::NONE).unwrap();
+        assert!(!a.show_sidebar);
+    }
+    #[test]
     fn esc_drops_commenting_back_to_visual() {
         let mut a = viewer();
         a.lines = vec!["hello".to_string()];
@@ -1217,6 +1401,19 @@ mod handle_tests {
 #[cfg(test)]
 mod status_tests {
     use super::*;
+    fn viewer() -> app::App {
+        app::App::load_file(std::path::Path::new("Cargo.toml"), false).unwrap()
+    }
+    fn line_text(line: &Line) -> String {
+        line.spans.iter().map(|s| s.content.to_string()).collect()
+    }
+    #[test]
+    fn status_shows_visual_and_comment_count() {
+        let mut a = viewer();
+        a.lines = vec!["hi".to_string()];
+        handle(&mut a, KeyCode::Char('v'), KeyModifiers::NONE).unwrap();
+        assert!(viewer_hint(false).contains("C"));
+    }
     #[test]
     fn hint_lists_compact_navigation_keys() {
         let h = viewer_hint(false);
@@ -1247,5 +1444,133 @@ mod status_tests {
         let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
         assert_eq!(text.chars().count(), 6);
         assert!(text.starts_with("left"));
+    }
+    #[test]
+    fn visual_tag_names_char_and_line_modes() {
+        use crate::select::{SelectKind, Selection};
+        let char_sel = Some(Selection { anchor: (0, 0), kind: SelectKind::Char });
+        let line_sel = Some(Selection { anchor: (0, 0), kind: SelectKind::Line });
+        assert_eq!(visual_tag(char_sel), "--VISUAL--");
+        assert_eq!(visual_tag(line_sel), "--VISUAL LINE--");
+        assert_eq!(visual_tag(None), "");
+    }
+    #[test]
+    fn comments_tag_counts() {
+        assert_eq!(comments_tag(0), " [0 comments]");
+        assert_eq!(comments_tag(2), " [2 comments]");
+    }
+    #[test]
+    fn comment_prompt_format() {
+        assert_eq!(
+            comment_prompt("Cargo.toml", 3, "ok"),
+            "Comment on Cargo.toml:3: ok"
+        );
+    }
+    #[test]
+    fn selection_paint_uses_blue_bg() {
+        let spans = vec![Span::raw("hello".to_string())];
+        let out = paint_selection_ranges(spans, &[(1, 4)]);
+        let text: String = out.iter().map(|s| s.content.to_string()).collect();
+        assert_eq!(text, "hello");
+        assert!(
+            out.iter().any(|s| s.style.bg == Some(Color::Blue)),
+            "no blue cell painted"
+        );
+        assert_eq!(out.iter().filter(|s| s.style.bg == Some(Color::Blue)).count(), 1);
+    }
+    #[test]
+    fn sidebar_lists_comment_rows() {
+        let mut a = viewer();
+        a.comments.push(app::Comment {
+            id: 0,
+            file: "f.rs".to_string(),
+            start: (0, 0),
+            end: (0, 2),
+            snippet: "hi".to_string(),
+            note: "n".to_string(),
+        });
+        let rows = sidebar_lines(&a, 10);
+        let text: String = rows.iter().map(line_text).collect();
+        assert!(text.contains("f.rs: 1:1 → 1:3"), "unexpected: {text}");
+        assert!(text.contains("hi | n"), "unexpected: {text}");
+    }
+    #[test]
+    fn sidebar_empty_shows_help() {
+        let a = viewer();
+        assert!(a.comments.is_empty());
+        let rows = sidebar_lines(&a, 10);
+        let text: String = rows.iter().map(line_text).collect();
+        assert!(text.contains("No comments"), "unexpected: {text}");
+    }
+    #[test]
+    fn render_smoke_visual_sidebar_commenting() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let mut a = viewer();
+        a.lines = vec!["hello world".to_string(), "second line".to_string()];
+        a.lang = None;
+        a.highlighted = None;
+        handle(&mut a, KeyCode::Char('v'), KeyModifiers::NONE).unwrap();
+        handle(&mut a, KeyCode::Char('e'), KeyModifiers::NONE).unwrap();
+        handle(&mut a, KeyCode::Char('j'), KeyModifiers::NONE).unwrap();
+        assert!(a.visual.is_some());
+        a.show_sidebar = true;
+        a.comments.push(app::Comment {
+            id: 0,
+            file: "f.rs".to_string(),
+            start: (0, 0),
+            end: (0, 4),
+            snippet: "hello".to_string(),
+            note: "n".to_string(),
+        });
+        a.commenting = Some(app::PendingComment {
+            snippet: "hello".to_string(),
+            start: (0, 0),
+            end: (0, 5),
+            draft: "ok".to_string(),
+        });
+        let backend = TestBackend::new(80, 24);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(f, &mut a)).unwrap();
+        let text: String = term
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol().to_string())
+            .collect();
+        assert!(text.contains("comments (C)"), "no sidebar title");
+        assert!(text.contains("Comment on"), "no input row");
+        // Input row replaces the status line while commenting; drop back
+        // to visual to check the mode tag + comment count row.
+        a.commenting = None;
+        term.draw(|f| render(f, &mut a)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let text: String = buf
+            .content()
+            .iter()
+            .map(|c| c.symbol().to_string())
+            .collect();
+        assert!(text.contains("--VISUAL--"), "no visual tag");
+        assert!(text.contains("[1 comments]"), "no count");
+        let blue = buf
+            .content()
+            .iter()
+            .filter(|c| c.bg == Color::Blue)
+            .count();
+        // Two-line selection: line 0 paints 11 cells (non-cursor row),
+        // line 1 paints 3 + cursor cell, so well above 10.
+        assert!(blue >= 10, "no blue selection cells in wrap mode: {blue}");
+        // Same selection stays visible unwrapped with an h_scroll window.
+        a.wrap = false;
+        a.h_scroll = 2;
+        term.draw(|f| render(f, &mut a)).unwrap();
+        let blue = term
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .filter(|c| c.bg == Color::Blue)
+            .count();
+        assert!(blue > 0, "no blue selection cells with h_scroll");
     }
 }
