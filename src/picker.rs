@@ -91,6 +91,81 @@ pub fn discover_files(root: &Path) -> (Vec<FileEntry>, bool) {
     (out, truncated)
 }
 
+/// One fuzzy hit: index into the entry slice, nucleo score, and matched
+/// columns as char indices into [`display_path`] (for highlight painting).
+/// Staged helper (wired in Task 3+); allow dead code until then.
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScoredMatch {
+    pub entry_idx: usize,
+    pub score: u32,
+    pub cols: Vec<usize>,
+}
+
+/// Display string for ranking and painting: lossy path with `/` separators
+/// (so Windows paths rank like posix ones).
+/// Staged helper (wired in Task 3+); allow dead code until then.
+#[allow(dead_code)]
+pub fn display_path(entry: &FileEntry) -> String {
+    entry.path.to_string_lossy().replace('\\', "/")
+}
+
+/// Fuzzy-filter `entries` by `query` with nucleo (smart-case: any uppercase
+/// makes the match case-sensitive). Empty query returns every entry
+/// name-sorted with no columns. Results sort by score desc, name for ties.
+#[allow(dead_code)]
+pub fn filter_files(entries: &[FileEntry], query: &str) -> Vec<ScoredMatch> {
+    if query.is_empty() {
+        let mut idx: Vec<usize> = (0..entries.len()).collect();
+        idx.sort_by(|&a, &b| entries[a].name.cmp(&entries[b].name));
+        return idx
+            .into_iter()
+            .map(|entry_idx| ScoredMatch {
+                entry_idx,
+                score: 0,
+                cols: Vec::new(),
+            })
+            .collect();
+    }
+    use nucleo_matcher::{
+        Config, Matcher, Utf32Str,
+        pattern::{AtomKind, CaseMatching, Normalization, Pattern},
+    };
+    let mut matcher = Matcher::new(Config::DEFAULT.match_paths());
+    let pattern = Pattern::new(
+        query,
+        CaseMatching::Smart,
+        Normalization::Smart,
+        AtomKind::Fuzzy,
+    );
+    let mut out = Vec::new();
+    let mut buf = Vec::new();
+    let mut indices = Vec::new();
+    for (entry_idx, entry) in entries.iter().enumerate() {
+        let shown = display_path(entry);
+        buf.clear();
+        let haystack = Utf32Str::new(&shown, &mut buf);
+        indices.clear();
+        if let Some(score) = pattern.indices(haystack, &mut matcher, &mut indices) {
+            indices.sort_unstable();
+            indices.dedup();
+            out.push(ScoredMatch {
+                entry_idx,
+                score,
+                cols: indices.iter().map(|&i| i as usize).collect(),
+            });
+        }
+    }
+    out.sort_by(|a, b| {
+        b.score.cmp(&a.score).then_with(|| {
+            entries[a.entry_idx]
+                .name
+                .cmp(&entries[b.entry_idx].name)
+        })
+    });
+    out
+}
+
 /// Clamp selection index into 0..len.
 pub fn clamp_selection(idx: usize, len: usize) -> usize {
     if len == 0 {
@@ -173,11 +248,59 @@ mod tests {
         assert!(files.iter().all(|f| f.name != "loop"));
         let _ = fs::remove_dir_all(&dir);
     }
+    fn entry(path: &str) -> FileEntry {
+        FileEntry {
+            name: path.rsplit('/').next().unwrap_or(path).to_string(),
+            path: PathBuf::from(path),
+            size: 0,
+        }
+    }
+    #[test]
+    fn empty_query_returns_name_sorted_without_cols() {
+        let entries = vec![entry("b.txt"), entry("a.txt")];
+        let got = filter_files(&entries, "");
+        assert_eq!(got.len(), 2);
+        // Name-sorted: a.txt (idx 1) before b.txt (idx 0).
+        assert_eq!(got[0].entry_idx, 1);
+        assert_eq!(got[1].entry_idx, 0);
+        assert!(got.iter().all(|m| m.cols.is_empty()));
+    }
+    #[test]
+    fn fuzzy_prefers_filename_and_reports_char_cols() {
+        let entries = vec![entry("docs/notes.md"), entry("src/main.rs")];
+        let got = filter_files(&entries, "main");
+        assert!(!got.is_empty());
+        assert_eq!(got[0].entry_idx, 1);
+        assert!(!got[0].cols.is_empty());
+        // Cols are valid char indices whose chars spell the query.
+        let shown = display_path(&entries[got[0].entry_idx]);
+        let chars: Vec<char> = shown.chars().collect();
+        for &c in &got[0].cols {
+            assert!(c < chars.len());
+        }
+        let hit: String = got[0].cols.iter().map(|&c| chars[c]).collect();
+        assert_eq!(hit.to_lowercase(), "main");
+        // Non-contiguous fuzzy still matches across separators.
+        let fuzzy = filter_files(&entries, "smrs");
+        assert!(fuzzy.iter().any(|m| m.entry_idx == 1));
+    }
+    #[test]
+    fn unicode_cols_are_char_not_byte() {
+        let entries = vec![entry("héllo_🌍.txt")];
+        let got = filter_files(&entries, "🌍");
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].cols, vec![6]);
+    }
+    #[test]
+    fn smart_case_upper_is_sensitive() {
+        let entries = vec![entry("src/main.rs")];
+        assert!(filter_files(&entries, "Main").is_empty());
+        assert_eq!(filter_files(&entries, "main").len(), 1);
+    }
     #[test]
     fn clamp_selection_empty_is_zero() {
         assert_eq!(clamp_selection(5, 0), 0);
-    }
-    #[test]
+    }    #[test]
     fn clamp_selection_bounds() {
         assert_eq!(clamp_selection(0, 3), 0);
         assert_eq!(clamp_selection(99, 3), 2);
