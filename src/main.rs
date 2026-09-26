@@ -303,6 +303,24 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
             );
             app.ensure_cursor_visible(cursor_row, vh);
             app.scroll = viewer::clamp_scroll(app.scroll, total, vh);
+            if !app.search_matches.is_empty() {
+                let (ml, mc) = app.search_matches[app.search_idx.min(app.search_matches.len() - 1)];
+                let mrow =
+                    viewer::display_row_for_cursor(&app.lines, text_w.max(1), app.wrap, ml, mc);
+                let m = if vh < 2 * 2 + 1 { 0 } else { 2 };
+                let in_middle = mrow >= app.scroll + m && mrow < app.scroll + vh.saturating_sub(m);
+                if !in_middle {
+                    app.scroll = crate::search::scroll_for_match(mrow, app.scroll, vh, 2);
+                    app.scroll = viewer::clamp_scroll(app.scroll, total, vh);
+                }
+            }
+            let match_rows: std::collections::HashSet<usize> = app
+                .search_matches
+                .iter()
+                .map(|&(ml, mc)| {
+                    viewer::display_row_for_cursor(&app.lines, text_w.max(1), app.wrap, ml, mc)
+                })
+                .collect();
             if !app.wrap {
                 let tw = text_w.max(1);
                 if app.cursor_col < app.h_scroll {
@@ -346,7 +364,7 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
                 let hl_row = src.is_some();
                 // Highlight the cursor cell on the cursor's display row.
                 let is_cursor_row = abs_row == cursor_row;
-                let body_span = if !is_cursor_row {
+                let mut body_span = if !is_cursor_row {
                     if hl_row {
                         windowed
                     } else {
@@ -399,6 +417,11 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
                         ]
                     }
                 };
+                if !is_cursor_row && match_rows.contains(&abs_row) {
+                    for sp in &mut body_span {
+                        sp.style = sp.style.add_modifier(ratatui::style::Modifier::UNDERLINED);
+                    }
+                }
                 let mut spans = vec![Span::styled(
                     format!("{:>width$} ", lidx + 1, width = gutter - 1),
                     Style::default().fg(Color::DarkGray),
@@ -421,6 +444,21 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
                 app.cursor_col + 1,
                 if app.wrap { "ON" } else { "OFF" }
             );
+            if app.searching {
+                if app.search_matches.is_empty() {
+                    s = format!("/{}  [no matches]", app.search_query);
+                } else {
+                    let idx = app.search_idx.min(app.search_matches.len() - 1);
+                    s = format!(
+                        "/{}  {}/{}",
+                        app.search_query,
+                        idx + 1,
+                        app.search_matches.len()
+                    );
+                }
+            } else if !app.search_query.is_empty() && !app.search_matches.is_empty() {
+                s.push_str(&format!("  /{}", app.search_query));
+            }
             if let Some(n) = &app.status_note {
                 s.push_str(n);
             }
@@ -461,5 +499,12 @@ mod handle_tests {
         let first = a.search_idx;
         handle(&mut a, KeyCode::Char('n'), KeyModifiers::NONE).unwrap();
         assert_eq!(a.search_idx, (first + 1) % a.search_matches.len());
+    }
+    #[test]
+    fn scroll_landing_uses_display_row() {
+        let lines = vec!["abcdef".to_string(), "xy".to_string()];
+        let row = crate::viewer::display_row_for_cursor(&lines, 2, true, 0, 3);
+        assert_eq!(row, 1);
+        assert_eq!(crate::search::scroll_for_match(row, 0, 5, 2), 0);
     }
 }
