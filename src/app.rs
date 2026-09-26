@@ -94,6 +94,9 @@ impl App {
         self.wrap = !self.wrap;
         self.h_scroll = 0;
     }
+    /// Legacy index mover (render still reads `picker_index`; Task 5/6
+    /// migrate render to `picker.selected`). Allow dead code until then.
+    #[allow(dead_code)]
     pub fn move_picker(&mut self, delta: isize) {
         let n = self.picker_index as isize + delta;
         let n = n.clamp(0, isize::MAX) as usize;

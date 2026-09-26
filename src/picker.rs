@@ -167,6 +167,8 @@ pub fn filter_files(entries: &[FileEntry], query: &str) -> Vec<ScoredMatch> {
 }
 
 /// Clamp selection index into 0..len.
+/// Legacy helper (keys moved to `picker_move`; render migrates in Task 5/6).
+#[allow(dead_code)]
 pub fn clamp_selection(idx: usize, len: usize) -> usize {
     if len == 0 {
         return 0;
