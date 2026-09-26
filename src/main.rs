@@ -676,39 +676,50 @@ fn comment_prompt(file: &str, line: usize, draft: &str) -> String {
     format!("Comment on {file}:{line}: {draft}")
 }
 
-/// Sidebar rows for the comments panel: `file: sL:sC → eL:eC snippet | note`
-/// with 1-based positions. Snippets flatten to one row and truncate to the
-/// first 40 chars + `…`. Shows the last `height` comments (no scroll in v1).
-fn sidebar_lines(app: &app::App, height: usize) -> Vec<Line<'static>> {
+/// Sidebar rows for the comments panel: per comment, three rows —
+/// dim `file: sL:sC → eL:eC` caption (1-based), blueish truncated
+/// snippet (flattened to one row, cut to `width` + `…`), then the full
+/// note. Shows the last `height / 3` comments (at least one, no scroll).
+fn sidebar_lines(app: &app::App, height: usize, width: usize) -> Vec<Line<'static>> {
     if app.comments.is_empty() {
         return vec![Line::from(Span::raw(
             "No comments — v select, Enter comment",
         ))];
     }
-    let n = height.max(1).min(app.comments.len());
+    const ROWS_PER_ITEM: usize = 3;
+    let w = width.max(1);
+    let n = (height / ROWS_PER_ITEM).max(1).min(app.comments.len());
+    let dim = Style::default().fg(Color::DarkGray);
+    let snip_style = Style::default().fg(Color::LightBlue);
     app.comments[app.comments.len() - n..]
         .iter()
-        .map(|c| {
+        .flat_map(|c| {
             let flat: String = c
                 .snippet
                 .replace('\r', "")
                 .replace('\n', " ")
                 .chars()
                 .collect();
-            let snip = if flat.chars().count() > 40 {
-                format!("{}…", flat.chars().take(40).collect::<String>())
+            let snip = if flat.chars().count() > w {
+                format!("{}…", flat.chars().take(w).collect::<String>())
             } else {
                 flat
             };
-            Line::from(Span::raw(format!(
-                "{}: {}:{} → {}:{} {snip} | {}",
-                c.file,
-                c.start.0 + 1,
-                c.start.1 + 1,
-                c.end.0 + 1,
-                c.end.1 + 1,
-                c.note,
-            )))
+            vec![
+                Line::from(Span::styled(
+                    format!(
+                        "{}: {}:{} → {}:{}",
+                        c.file,
+                        c.start.0 + 1,
+                        c.start.1 + 1,
+                        c.end.0 + 1,
+                        c.end.1 + 1,
+                    ),
+                    dim,
+                )),
+                Line::from(Span::styled(snip, snip_style)),
+                Line::from(Span::raw(c.note.clone())),
+            ]
         })
         .collect()
 }
@@ -781,11 +792,11 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
                 .direction(Direction::Vertical)
                 .constraints([Constraint::Min(1), Constraint::Length(2)])
                 .split(area);
-            // Sidebar takes a fixed 35-col strip when toggled (`[text | 35]`).
+            // Sidebar takes a fixed 50-col strip when toggled (`[text | 50]`).
             let (text_area, side_area) = if app.show_sidebar {
                 let h = Layout::default()
                     .direction(Direction::Horizontal)
-                    .constraints([Constraint::Min(1), Constraint::Length(35)])
+                    .constraints([Constraint::Min(1), Constraint::Length(50)])
                     .split(chunks[0]);
                 (h[0], Some(h[1]))
             } else {
@@ -999,7 +1010,8 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
             f.render_widget(body, text_area);
             if let Some(side) = side_area {
                 let inner_h = side.height.saturating_sub(2) as usize;
-                let side_rows = sidebar_lines(app, inner_h);
+                let inner_w = side.width.saturating_sub(2) as usize;
+                let side_rows = sidebar_lines(app, inner_h, inner_w);
                 let panel = Paragraph::new(side_rows).block(
                     Block::default()
                         .borders(Borders::ALL)
@@ -1489,16 +1501,36 @@ mod status_tests {
             snippet: "hi".to_string(),
             note: "n".to_string(),
         });
-        let rows = sidebar_lines(&a, 10);
+        let rows = sidebar_lines(&a, 10, 40);
+        assert_eq!(rows.len(), 3);
         let text: String = rows.iter().map(line_text).collect();
         assert!(text.contains("f.rs: 1:1 → 1:3"), "unexpected: {text}");
-        assert!(text.contains("hi | n"), "unexpected: {text}");
+        assert!(text.contains("hi"), "unexpected: {text}");
+        assert!(text.contains('n'), "unexpected: {text}");
+        assert_eq!(rows[0].spans[0].style.fg, Some(Color::DarkGray));
+        assert_eq!(rows[1].spans[0].style.fg, Some(Color::LightBlue));
+    }
+    #[test]
+    fn sidebar_snippet_truncates_to_width() {
+        let mut a = viewer();
+        a.comments.push(app::Comment {
+            id: 0,
+            file: "f.rs".to_string(),
+            start: (0, 0),
+            end: (0, 10),
+            snippet: "abcdefghij".to_string(),
+            note: "n".to_string(),
+        });
+        let rows = sidebar_lines(&a, 10, 4);
+        assert_eq!(rows.len(), 3);
+        let snip: String = rows[1].spans.iter().map(|s| s.content.to_string()).collect();
+        assert_eq!(snip, "abcd…");
     }
     #[test]
     fn sidebar_empty_shows_help() {
         let a = viewer();
         assert!(a.comments.is_empty());
-        let rows = sidebar_lines(&a, 10);
+        let rows = sidebar_lines(&a, 10, 40);
         let text: String = rows.iter().map(line_text).collect();
         assert!(text.contains("No comments"), "unexpected: {text}");
     }
