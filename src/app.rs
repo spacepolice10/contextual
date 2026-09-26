@@ -23,6 +23,12 @@ pub struct App {
     pub viewport_h: usize,
     pub cursor_line: usize,
     pub cursor_col: usize,
+    pub search_query: String,
+    pub search_matches: Vec<(usize, usize)>,
+    pub search_idx: usize,
+    pub searching: bool,
+    pub saved_cursor: Option<(usize, usize)>,
+    pub saved_scroll: Option<usize>,
     pub lang: Option<Lang>,
     pub highlighted: Option<Vec<Vec<Span<'static>>>>,
     // Theme used at load for `highlighted`; reserved for future re-highlight.
@@ -72,6 +78,33 @@ impl App {
             self.scroll = display_row + 1 - viewport;
         }
     }
+    pub fn start_search(&mut self) {
+        self.searching = true;
+        self.saved_cursor = Some((self.cursor_line, self.cursor_col));
+        self.saved_scroll = Some(self.scroll);
+        self.search_query.clear();
+        self.search_matches.clear();
+        self.search_idx = 0;
+    }
+    pub fn cancel_search(&mut self) {
+        self.searching = false;
+        if let Some((line, col)) = self.saved_cursor {
+            self.cursor_line = line;
+            self.cursor_col = col;
+        }
+        if let Some(s) = self.saved_scroll {
+            self.scroll = s;
+        }
+        self.search_query.clear();
+        self.search_matches.clear();
+        self.saved_cursor = None;
+        self.saved_scroll = None;
+    }
+    pub fn commit_search(&mut self) {
+        self.searching = false;
+        self.saved_cursor = None;
+        self.saved_scroll = None;
+    }
 }
 
 use anyhow::{Context, Result};
@@ -93,6 +126,12 @@ impl App {
             viewport_h: 20,
             cursor_line: 0,
             cursor_col: 0,
+            search_query: String::new(),
+            search_matches: Vec::new(),
+            search_idx: 0,
+            searching: false,
+            saved_cursor: None,
+            saved_scroll: None,
             lang: None,
             highlighted: None,
             theme: highlight::Theme::Dark,
@@ -121,6 +160,12 @@ impl App {
             viewport_h: 20,
             cursor_line: 0,
             cursor_col: 0,
+            search_query: String::new(),
+            search_matches: Vec::new(),
+            search_idx: 0,
+            searching: false,
+            saved_cursor: None,
+            saved_scroll: None,
             lang,
             highlighted,
             theme,
@@ -147,6 +192,12 @@ mod tests {
             viewport_h: 20,
             cursor_line: 0,
             cursor_col: 0,
+            search_query: String::new(),
+            search_matches: Vec::new(),
+            search_idx: 0,
+            searching: false,
+            saved_cursor: None,
+            saved_scroll: None,
             lang: None,
             highlighted: None,
             theme: crate::highlight::Theme::Dark,
@@ -198,5 +249,18 @@ mod tests {
         assert_eq!(app.lang, Some(crate::highlight::Lang::Rust));
         assert!(app.highlighted.is_some());
         let _ = std::fs::remove_file(&path);
+    }
+    #[test]
+    fn search_state_defaults_and_restore() {
+        let mut a = viewer_app(3);
+        assert!(!a.searching);
+        assert!(a.search_query.is_empty());
+        a.searching = true;
+        a.saved_cursor = Some((1, 2));
+        a.saved_scroll = Some(4);
+        a.cancel_search();
+        assert!(!a.searching);
+        assert_eq!((a.cursor_line, a.cursor_col), (1, 2));
+        assert_eq!(a.scroll, 4);
     }
 }
