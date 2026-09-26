@@ -26,13 +26,15 @@ Rejected B (separate picker-style results list, double UI code for little v1 gai
 Search input (status bar line 1 while `searching`):
 - Format: `/query  3/12` or `/query  [no matches]`; cursor `|` at end (no mid-line editing in v1).
 - Each keystroke recomputes matches live and previews nearest match (cursor follows, scroll rule applies).
+- After commit, status keeps `/query  i/N` (current/total) until cleared.
 
-Highlights:
-- Current match: reverse/dark-gray bg (same as cursor style) so it reads as "cursor is here".
-- Other matches in viewport: subtle underline. Overlay composes over tree-sitter spans; highlight underneath preserved.
+Highlights (vim-like Search vs cursor):
+- Current match: reverse/dark-gray bg on the cursor cell (same as cursor style) so it reads as "cursor is here".
+- Other matches in viewport: yellow bg on the exact matched substring (`chunk_match_ranges` clips to the visible wrap chunk / h-scroll window; `paint_search_ranges` repaints spans, syntax underneath replaced like vim's Search). Current match's remaining cells are yellow too; only its first cell is reverse.
 
 Keys (Viewer):
-- `/` enter search, `Esc` cancel/restore, `Enter` commit, `n` next, `N` / `Shift+N` prev. `n`/`N` with no active query or no matches: no-op.
+- `/` enter search, `Esc` cancel/restore while typing, `Enter` commit, `n` next, `N` / `Shift+N` prev. `n`/`N` with no active query or no matches: no-op.
+- `Esc` with a committed search active clears query + matches (stays in viewer); a second `Esc` resumes normal behavior (picker-back / quit). `q` always quits.
 
 ## Data flow
 1. `/` → save cursor/scroll, `searching=true`, clear query/matches.
