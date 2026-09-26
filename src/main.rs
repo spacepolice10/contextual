@@ -70,6 +70,10 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+/// Max accumulated count prefix (`v3w`, `5j`); mirrors `search::MAX_MATCHES`
+/// style so huge digit runs can't hang repeat loops or wrap `as isize`.
+const MAX_COUNT: usize = 10_000;
+
 fn handle(app: &mut app::App, code: KeyCode, mods: KeyModifiers) -> Result<bool> {
     use app::Mode;
     if mods.contains(KeyModifiers::CONTROL) && code == KeyCode::Char('c') {
@@ -286,7 +290,12 @@ fn handle(app: &mut app::App, code: KeyCode, mods: KeyModifiers) -> Result<bool>
                         && !mods.contains(KeyModifiers::ALT) =>
                 {
                     let d = (c as u8 - b'0') as usize;
-                    let n = app.pending_count.unwrap_or(0).saturating_mul(10).saturating_add(d);
+                    let n = app
+                        .pending_count
+                        .unwrap_or(0)
+                        .saturating_mul(10)
+                        .saturating_add(d)
+                        .min(MAX_COUNT);
                     app.pending_count = Some(n);
                     Ok(false)
                 }
@@ -295,7 +304,7 @@ fn handle(app: &mut app::App, code: KeyCode, mods: KeyModifiers) -> Result<bool>
                         && !mods.contains(KeyModifiers::ALT)
                         && app.pending_count.is_some() =>
                 {
-                    let n = app.pending_count.unwrap_or(0).saturating_mul(10);
+                    let n = app.pending_count.unwrap_or(0).saturating_mul(10).min(MAX_COUNT);
                     app.pending_count = Some(n);
                     Ok(false)
                 }
@@ -322,7 +331,14 @@ fn handle(app: &mut app::App, code: KeyCode, mods: KeyModifiers) -> Result<bool>
                         .unwrap_or(0);
                     Ok(false)
                 }
-                KeyCode::Home | KeyCode::Char('g') => {
+                KeyCode::Home => {
+                    app.pending_count = None;
+                    app.cursor_line = 0;
+                    app.cursor_col = 0;
+                    app.scroll = 0;
+                    Ok(false)
+                }
+                KeyCode::Char('g') => {
                     match app.pending_count.take() {
                         Some(n) if !app.lines.is_empty() => {
                             // Vim `N g`: jump to 1-based line N, clamped.
@@ -340,7 +356,16 @@ fn handle(app: &mut app::App, code: KeyCode, mods: KeyModifiers) -> Result<bool>
                     }
                     Ok(false)
                 }
-                KeyCode::End | KeyCode::Char('G') => {
+                KeyCode::End => {
+                    app.pending_count = None;
+                    if !app.lines.is_empty() {
+                        app.cursor_line = app.lines.len() - 1;
+                        app.cursor_col = app.lines[app.cursor_line].chars().count();
+                    }
+                    app.scroll = usize::MAX;
+                    Ok(false)
+                }
+                KeyCode::Char('G') => {
                     match app.pending_count.take() {
                         Some(n) if !app.lines.is_empty() => {
                             // Vim `N G`: jump to 1-based line N, clamped.
@@ -959,6 +984,42 @@ mod handle_tests {
         let quit = handle(&mut a, KeyCode::Esc, KeyModifiers::NONE).unwrap();
         assert!(!quit);
         assert!(a.pending_count.is_none());
+    }
+    #[test]
+    fn count_home_stays_top_and_end_goes_bottom() {
+        let mut a = viewer();
+        a.lines = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        a.cursor_line = 1;
+        handle(&mut a, KeyCode::Char('5'), KeyModifiers::NONE).unwrap();
+        handle(&mut a, KeyCode::Home, KeyModifiers::NONE).unwrap();
+        assert_eq!((a.cursor_line, a.cursor_col), (0, 0));
+        assert!(a.pending_count.is_none());
+        a.cursor_line = 0;
+        handle(&mut a, KeyCode::Char('5'), KeyModifiers::NONE).unwrap();
+        handle(&mut a, KeyCode::End, KeyModifiers::NONE).unwrap();
+        assert_eq!(a.cursor_line, 2);
+        assert!(a.pending_count.is_none());
+        // Counts still apply to `g`/`G`.
+        handle(&mut a, KeyCode::Char('2'), KeyModifiers::NONE).unwrap();
+        handle(&mut a, KeyCode::Char('G'), KeyModifiers::NONE).unwrap();
+        assert_eq!(a.cursor_line, 1);
+    }
+    #[test]
+    fn huge_count_is_capped_and_does_not_hang() {
+        let mut a = viewer();
+        a.lines = vec!["foo bar".to_string(), "baz".to_string()];
+        for c in "9999999999".chars() {
+            handle(&mut a, KeyCode::Char(c), KeyModifiers::NONE).unwrap();
+        }
+        assert_eq!(a.pending_count, Some(10_000));
+        handle(&mut a, KeyCode::Char('w'), KeyModifiers::NONE).unwrap();
+        assert!(a.pending_count.is_none());
+        assert!((a.cursor_line, a.cursor_col) <= (1, 3));
+        for c in "9999999999".chars() {
+            handle(&mut a, KeyCode::Char(c), KeyModifiers::NONE).unwrap();
+        }
+        handle(&mut a, KeyCode::Char('j'), KeyModifiers::NONE).unwrap();
+        assert_eq!(a.cursor_line, 1);
     }
     #[test]
     fn b_moves_to_prev_word_start() {
