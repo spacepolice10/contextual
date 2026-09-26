@@ -1,6 +1,7 @@
 mod app;
 mod highlight;
 mod picker;
+mod search;
 mod viewer;
 
 use anyhow::{Context, Result};
