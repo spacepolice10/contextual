@@ -793,42 +793,198 @@ fn status_line(width: usize, left: &str, right: &str) -> Line<'static> {
     Line::from(vec![Span::raw(l), Span::styled(t, subtle)])
 }
 
+/// Picker prompt text: `> query  n/m` with `[no matches]` / `[truncated…]`
+/// notes. The block cursor cell is appended by `render`.
+fn picker_prompt_line(query: &str, filtered: usize, total: usize, truncated: bool) -> String {
+    let mut s = format!("> {query}  {filtered}/{total}");
+    if filtered == 0 {
+        s.push_str("  [no matches]");
+    }
+    if truncated {
+        s.push_str("  [truncated at 50k]");
+    }
+    s
+}
+
+/// Preview pane visibility: hidden on narrow terminals (results full-width).
+fn picker_preview_visible(width: usize) -> bool {
+    width >= 80
+}
+
+/// Max preview bytes (alongside the `max_lines` cap at call sites).
+const PREVIEW_MAX_BYTES: usize = 100 * 1024;
+
+/// Capped lossy preview read: at most `PREVIEW_MAX_BYTES` then `max_lines`
+/// lines. Returns lines plus a `[binary preview]` note when NUL bytes are
+/// present. Never fails: unreadable files yield empty lines.
+fn read_preview_lines(path: &std::path::Path, max_lines: usize) -> (Vec<String>, Option<String>) {
+    let bytes = std::fs::read(path).unwrap_or_default();
+    let capped = bytes.len().min(PREVIEW_MAX_BYTES);
+    let text = String::from_utf8_lossy(&bytes[..capped]).to_string();
+    let binary = bytes[..capped].contains(&0);
+    let lines: Vec<String> = text.lines().take(max_lines).map(|s| s.to_string()).collect();
+    let note = binary.then(|| "[binary preview]".to_string());
+    (lines, note)
+}
+
 fn render(f: &mut ratatui::Frame, app: &mut app::App) {
     use app::Mode;
     let area = f.area();
     match app.mode {
         Mode::Picker => {
-            let items: Vec<ListItem> = app
-                .files
-                .iter()
-                .map(|e| {
-                    ListItem::new(Line::from(vec![Span::raw(format!(
-                        "{}  ({}b)",
-                        e.name, e.size
-                    ))]))
-                })
-                .collect();
-            let list = List::new(items)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(Style::default().fg(Color::DarkGray))
-                        .title(" contextual — pick a file (Enter/q) "),
-                )
-                .highlight_style(Style::default().bg(Color::DarkGray));
-            if app.files.is_empty() {
-                let p = Paragraph::new("No files in this directory — press q to quit.").block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(Style::default().fg(Color::DarkGray))
-                        .title(" contextual "),
-                );
-                f.render_widget(p, area);
+            let show_preview = picker_preview_visible(area.width as usize);
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(1), Constraint::Min(1)])
+                .split(area);
+            let prompt = picker_prompt_line(
+                &app.picker.query,
+                app.picker.filtered.len(),
+                app.files.len(),
+                app.picker.truncated,
+            );
+            f.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::raw(prompt),
+                    Span::styled(
+                        "▌",
+                        Style::default().bg(Color::DarkGray).fg(Color::White),
+                    ),
+                ])),
+                rows[0],
+            );
+            let (list_area, preview_area) = if show_preview {
+                let h = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+                    .split(rows[1]);
+                (h[0], Some(h[1]))
             } else {
-                use ratatui::widgets::ListState;
-                let mut st = ListState::default();
-                st.select(Some(app.picker_index));
-                f.render_stateful_widget(list, area, &mut st);
+                (rows[1], None)
+            };
+            let list_h = list_area.height.saturating_sub(2) as usize;
+            let row_w = list_area.width.saturating_sub(2) as usize;
+            let total = app.picker.filtered.len();
+            let sel = app.picker.selected.min(total.saturating_sub(1));
+            // Window keeping the selection visible, biased to context below.
+            let start = if total <= list_h.max(1) || list_h == 0 {
+                0
+            } else {
+                sel.saturating_sub(list_h / 2).min(total - list_h)
+            };
+            let end = (start + list_h.max(1)).min(total);
+            let dim = Style::default().fg(Color::DarkGray);
+            let sel_style = Style::default().bg(Color::DarkGray);
+            let mut items = Vec::new();
+            if total == 0 {
+                let msg = if app.picker.query.is_empty() {
+                    "No files in this directory — press q to quit."
+                } else {
+                    "No matches — keep typing or Esc to clear."
+                };
+                items.push(ListItem::new(Line::from(Span::styled(msg, dim))));
+            } else {
+                for (i, m) in app.picker.filtered[start..end].iter().enumerate() {
+                    if let Some(entry) = app.files.get(m.entry_idx) {
+                        let full = crate::picker::display_path(entry);
+                        let shown: String = full.chars().take(row_w.max(1)).collect();
+                        let n = shown.chars().count();
+                        let mut spans = vec![Span::raw(shown)];
+                        if start + i == sel {
+                            spans = paint_ranges(spans, &[(0, n)], sel_style);
+                        }
+                        let ranges: Vec<(usize, usize)> = m
+                            .cols
+                            .iter()
+                            .filter(|&&c| c < n)
+                            .map(|&c| (c, c + 1))
+                            .collect();
+                        if !ranges.is_empty() {
+                            spans = paint_search_ranges(spans, &ranges);
+                        }
+                        items.push(ListItem::new(Line::from(spans)));
+                    }
+                }
+            }
+            let list = List::new(items).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::DarkGray))
+                    .title(" contextual — pick a file "),
+            );
+            f.render_widget(list, list_area);
+            if let Some(preview) = preview_area {
+                let inner_w = preview.width.saturating_sub(2) as usize;
+                let inner_h = preview.height.saturating_sub(2) as usize;
+                let hit = app
+                    .picker
+                    .filtered
+                    .get(app.picker.selected)
+                    .and_then(|m| app.files.get(m.entry_idx));
+                let (title, body_rows) = match hit {
+                    None => (
+                        " preview ".to_string(),
+                        vec![Line::from(Span::styled("No matches", dim))],
+                    ),
+                    Some(entry) => {
+                        let shown = crate::picker::display_path(entry);
+                        let (lines, note) = read_preview_lines(&entry.path, 200);
+                        let text = lines.join("\n");
+                        let title = match note {
+                            Some(n) => format!(" {shown} {n} "),
+                            None => format!(" {shown} "),
+                        };
+                        // Styled source per logical line; length mismatch
+                        // falls back to plain rows (never drops text).
+                        let styled: Vec<Vec<Span<'static>>> =
+                            match crate::highlight::detect(&entry.path).and_then(|l| {
+                                crate::highlight::highlight_file(&text, l, app.theme)
+                            }) {
+                                Some(h) if h.len() == lines.len() => h,
+                                _ => lines
+                                    .iter()
+                                    .map(|l| vec![Span::raw(l.clone())])
+                                    .collect(),
+                            };
+                        let display =
+                            crate::viewer::build_display_lines(&lines, inner_w.max(1), true);
+                        app.picker.preview_scroll = crate::viewer::clamp_scroll(
+                            app.picker.preview_scroll,
+                            display.len(),
+                            inner_h,
+                        );
+                        let pend =
+                            (app.picker.preview_scroll + inner_h).min(display.len());
+                        let w = inner_w.max(1);
+                        let mut prev: Option<usize> = None;
+                        let mut k: usize = 0;
+                        let mut body_rows = Vec::new();
+                        for (lidx, _) in &display[app.picker.preview_scroll..pend] {
+                            match prev {
+                                Some(p) if p == *lidx => {
+                                    k += 1;
+                                }
+                                _ => {
+                                    k = 0;
+                                }
+                            }
+                            prev = Some(*lidx);
+                            let src: &[Span<'static>] =
+                                styled.get(*lidx).map(|v| v.as_slice()).unwrap_or(&[]);
+                            body_rows.push(Line::from(
+                                crate::highlight::slice_spans(src, k * w, w),
+                            ));
+                        }
+                        (title, body_rows)
+                    }
+                };
+                let panel = Paragraph::new(body_rows).block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(Color::DarkGray))
+                        .title(title),
+                );
+                f.render_widget(panel, preview);
             }
         }
         Mode::Viewer => {
@@ -1601,6 +1757,64 @@ mod status_tests {
     fn comments_tag_counts() {
         assert_eq!(comments_tag(0), " [0 comments]");
         assert_eq!(comments_tag(2), " [2 comments]");
+    }
+    #[test]
+    fn picker_prompt_shows_count() {
+        let s = picker_prompt_line("mr", 3, 120, false);
+        assert!(s.contains("> mr"), "unexpected: {s}");
+        assert!(s.contains("3/120"), "unexpected: {s}");
+    }
+    #[test]
+    fn picker_prompt_flags_empty_and_truncated() {
+        let s = picker_prompt_line("zzz", 0, 40, false);
+        assert!(s.contains("[no matches]"), "unexpected: {s}");
+        let s = picker_prompt_line("", 50_000, 50_000, true);
+        assert!(s.contains("[truncated at 50k]"), "unexpected: {s}");
+    }
+    #[test]
+    fn picker_preview_cap_truncates() {
+        let dir = std::env::temp_dir().join(format!(
+            "ctx_prev_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("big.txt");
+        let body: String = (0..1000).map(|i| format!("line {i}\n")).collect();
+        std::fs::write(&path, body).unwrap();
+        let (lines, note) = read_preview_lines(&path, 200);
+        assert_eq!(lines.len(), 200);
+        assert_eq!(lines[0], "line 0");
+        assert!(note.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn picker_preview_binary_shows_note() {
+        let dir = std::env::temp_dir().join(format!(
+            "ctx_prevbin_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("bin.dat");
+        std::fs::write(&path, b"ab\x00cd\nline2\n").unwrap();
+        let (lines, note) = read_preview_lines(&path, 200);
+        assert!(!lines.is_empty());
+        assert!(lines.len() <= 200);
+        assert_eq!(note.as_deref(), Some("[binary preview]"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn picker_preview_narrow_hidden() {
+        assert!(!picker_preview_visible(79));
+        assert!(picker_preview_visible(80));
+        assert!(!picker_preview_visible(0));
     }
     #[test]
     fn comment_prompt_format() {

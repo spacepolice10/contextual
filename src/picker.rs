@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 pub struct FileEntry {
     pub name: String,
     pub path: PathBuf,
+    /// Byte size (populate at discovery; render omits it in v1 — Task 6 decides).
+    #[allow(dead_code)]
     pub size: u64,
 }
 
