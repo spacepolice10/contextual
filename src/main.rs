@@ -155,6 +155,11 @@ fn handle(app: &mut app::App, code: KeyCode, mods: KeyModifiers) -> Result<bool>
             }
             match code {
                 KeyCode::Char('q') | KeyCode::Esc => {
+                    // Committed search active: first Esc clears it (q still quits).
+                    if code == KeyCode::Esc && !app.searching && !app.search_matches.is_empty() {
+                        app.cancel_search();
+                        return Ok(false);
+                    }
                     if app.from_picker && code == KeyCode::Esc {
                         let files = picker::list_files(std::path::Path::new("."))?;
                         *app = app::App::new_picker(files);
@@ -485,6 +490,20 @@ mod handle_tests {
         assert!(a.searching);
         handle(&mut a, KeyCode::Esc, KeyModifiers::NONE).unwrap();
         assert!(!a.searching);
+    }
+    #[test]
+    fn esc_clears_committed_search() {
+        let mut a = viewer();
+        handle(&mut a, KeyCode::Char('/'), KeyModifiers::NONE).unwrap();
+        for c in "package".chars() {
+            handle(&mut a, KeyCode::Char(c), KeyModifiers::NONE).unwrap();
+        }
+        handle(&mut a, KeyCode::Enter, KeyModifiers::NONE).unwrap();
+        assert!(!a.search_matches.is_empty());
+        let quit = handle(&mut a, KeyCode::Esc, KeyModifiers::NONE).unwrap();
+        assert!(!quit);
+        assert!(a.search_query.is_empty());
+        assert!(a.search_matches.is_empty());
     }
     #[test]
     fn typing_runs_matcher_and_n_advances() {
