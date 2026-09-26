@@ -462,7 +462,13 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
                     );
                 }
             } else if !app.search_query.is_empty() && !app.search_matches.is_empty() {
-                s.push_str(&format!("  /{}", app.search_query));
+                let idx = app.search_idx.min(app.search_matches.len() - 1);
+                s.push_str(&format!(
+                    "  /{} {}/{}",
+                    app.search_query,
+                    idx + 1,
+                    app.search_matches.len()
+                ));
             }
             if let Some(n) = &app.status_note {
                 s.push_str(n);
