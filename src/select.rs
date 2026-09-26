@@ -64,6 +64,13 @@ pub fn extract_text(
         (end, start)
     };
     let last = end.0.min(lines.len().saturating_sub(1));
+    // Clamp a past-EOF end to the end of the last line so the Char
+    // single-line check below sees the clamped position.
+    let end = if end.0 == last {
+        end
+    } else {
+        (last, usize::MAX)
+    };
     match kind {
         SelectKind::Line => (start.0..=last)
             .map(|l| line_chars(&lines[l], 0, usize::MAX))
@@ -261,6 +268,30 @@ mod tests {
         assert_eq!(
             selection_chunks((0, 1), (0, 5), 0, 2, 3),
             vec![(0, 3)]
+        );
+    }
+    #[test]
+    fn extract_clamps_end_past_eof_single_line() {
+        let lines = vec!["hi".to_string()];
+        assert_eq!(
+            extract_text(&lines, (0, 0), (5, 0), SelectKind::Char),
+            "hi"
+        );
+    }
+    #[test]
+    fn extract_clamps_end_past_eof_last_line() {
+        let lines = vec!["aa".to_string(), "bb".to_string()];
+        assert_eq!(
+            extract_text(&lines, (1, 0), (5, 0), SelectKind::Char),
+            "bb"
+        );
+    }
+    #[test]
+    fn extract_clamps_end_past_eof_multiline() {
+        let lines = vec!["aa".to_string(), "bb".to_string()];
+        assert_eq!(
+            extract_text(&lines, (0, 1), (5, 0), SelectKind::Char),
+            "a\nbb"
         );
     }
 }
