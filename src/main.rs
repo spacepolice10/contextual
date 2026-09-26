@@ -241,6 +241,32 @@ fn handle(app: &mut app::App, code: KeyCode, mods: KeyModifiers) -> Result<bool>
     }
 }
 
+/// Repaint exact-match ranges with vim-like Search style (yellow bg).
+/// Ranges are chunk-relative char offsets into the concatenated spans.
+fn paint_search_ranges(spans: Vec<Span<'static>>, ranges: &[(usize, usize)]) -> Vec<Span<'static>> {
+    let bg = Style::default().bg(Color::Yellow).fg(Color::Black);
+    let mut cells: Vec<(char, Style)> = Vec::new();
+    for s in &spans {
+        for c in s.content.chars() {
+            cells.push((c, s.style));
+        }
+    }
+    for &(a, b) in ranges {
+        for i in a.min(cells.len())..b.min(cells.len()) {
+            cells[i].1 = bg;
+        }
+    }
+    let mut out: Vec<Span<'static>> = Vec::new();
+    for (c, st) in cells {
+        let t = c.to_string();
+        match out.last_mut() {
+            Some(last) if last.style == st => last.content.to_mut().push_str(&t),
+            _ => out.push(Span::styled(t, st)),
+        }
+    }
+    out
+}
+
 fn render(f: &mut ratatui::Frame, app: &mut app::App) {
     use app::Mode;
     let area = f.area();
@@ -319,13 +345,15 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
                     app.scroll = viewer::clamp_scroll(app.scroll, total, vh);
                 }
             }
-            let match_rows: std::collections::HashSet<usize> = app
-                .search_matches
-                .iter()
-                .map(|&(ml, mc)| {
-                    viewer::display_row_for_cursor(&app.lines, text_w.max(1), app.wrap, ml, mc)
-                })
-                .collect();
+            // Match columns grouped by logical line for exact-substring painting.
+            let mut line_matches: std::collections::HashMap<usize, Vec<usize>> =
+                std::collections::HashMap::new();
+            if !app.search_query.is_empty() {
+                for &(ml, mc) in &app.search_matches {
+                    line_matches.entry(ml).or_default().push(mc);
+                }
+            }
+            let search_qlen = app.search_query.chars().count();
             if !app.wrap {
                 let tw = text_w.max(1);
                 if app.cursor_col < app.h_scroll {
@@ -361,12 +389,27 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
                 };
                 // Visible window as styled spans. Plain path stays
                 // byte-identical to the old `shown` string pipeline.
-                let windowed: Vec<Span> = match src {
+                let mut windowed: Vec<Span> = match src {
                     Some(spans) if app.wrap => highlight::slice_spans(spans, chunk_k * w, w),
                     Some(spans) => highlight::slice_spans(spans, app.h_scroll, w),
                     None => vec![Span::raw(shown.clone())],
                 };
                 let hl_row = src.is_some();
+                // Paint exact match substrings yellow (vim-like Search). Runs
+                // before the cursor split so the cursor cell still wins on the
+                // current match's first cell.
+                if search_qlen > 0 {
+                    if let Some(cols) = line_matches.get(lidx) {
+                        let coff = if app.wrap { chunk_k * w } else { app.h_scroll };
+                        let nchars: usize =
+                            windowed.iter().map(|s| s.content.chars().count()).sum();
+                        let ranges =
+                            crate::search::chunk_match_ranges(cols, search_qlen, coff, nchars);
+                        if !ranges.is_empty() {
+                            windowed = paint_search_ranges(windowed, &ranges);
+                        }
+                    }
+                }
                 // Highlight the cursor cell on the cursor's display row.
                 let is_cursor_row = abs_row == cursor_row;
                 let mut body_span = if !is_cursor_row {
@@ -422,11 +465,6 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
                         ]
                     }
                 };
-                if !is_cursor_row && match_rows.contains(&abs_row) {
-                    for sp in &mut body_span {
-                        sp.style = sp.style.add_modifier(ratatui::style::Modifier::UNDERLINED);
-                    }
-                }
                 let mut spans = vec![Span::styled(
                     format!("{:>width$} ", lidx + 1, width = gutter - 1),
                     Style::default().fg(Color::DarkGray),

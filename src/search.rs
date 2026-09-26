@@ -56,6 +56,30 @@ pub fn scroll_for_match(match_row: usize, scroll: usize, vh: usize, margin: usiz
     crate::viewer::clamp_scroll(result, usize::MAX, vh)
 }
 
+/// Intersect match columns on one logical line with a visible chunk.
+/// `match_cols`: char-cols where matches of char-length `qlen` start.
+/// `chunk_off`/`chunk_len`: visible char window (wrap chunk or h-scroll
+/// window). Returns chunk-relative ranges; empty when nothing visible.
+pub fn chunk_match_ranges(
+    match_cols: &[usize],
+    qlen: usize,
+    chunk_off: usize,
+    chunk_len: usize,
+) -> Vec<(usize, usize)> {
+    if qlen == 0 || chunk_len == 0 {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for &mc in match_cols {
+        let s = mc.max(chunk_off);
+        let e = (mc + qlen).min(chunk_off + chunk_len);
+        if s < e {
+            out.push((s - chunk_off, e - chunk_off));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -99,5 +123,28 @@ mod tests {
     #[test]
     fn scroll_tiny_viewport_saturates() {
         assert_eq!(scroll_for_match(2, 0, 3, 2), 0);
+    }
+    #[test]
+    fn chunk_ranges_basic() {
+        assert_eq!(chunk_match_ranges(&[2], 3, 0, 10), vec![(2, 5)]);
+    }
+    #[test]
+    fn chunk_ranges_clips_to_chunk() {
+        // Match [8,12) vs chunk [5,10) -> [(3,5)].
+        assert_eq!(chunk_match_ranges(&[8], 4, 5, 5), vec![(3, 5)]);
+    }
+    #[test]
+    fn chunk_ranges_outside_is_empty() {
+        assert!(chunk_match_ranges(&[0], 2, 5, 5).is_empty());
+        assert!(chunk_match_ranges(&[10], 2, 0, 5).is_empty());
+    }
+    #[test]
+    fn chunk_ranges_zero_qlen_or_len_is_empty() {
+        assert!(chunk_match_ranges(&[2], 0, 0, 10).is_empty());
+        assert!(chunk_match_ranges(&[], 3, 0, 10).is_empty());
+    }
+    #[test]
+    fn chunk_ranges_multiple() {
+        assert_eq!(chunk_match_ranges(&[0, 6], 2, 0, 10), vec![(0, 2), (6, 8)]);
     }
 }
