@@ -1,5 +1,5 @@
 use crate::highlight::{self, Lang};
-use crate::picker::{clamp_selection, filter_files, FileEntry, ScoredMatch};
+use crate::picker::{filter_files, FileEntry, ScoredMatch};
 use crate::select::Selection;
 use ratatui::text::Span;
 
@@ -32,8 +32,6 @@ pub struct PendingComment {
 /// Fuzzy-picker input state: live query, ranked hits into `App::files`,
 /// keyboard selection, and preview scroll. `filtered` holds `ScoredMatch`
 /// values whose `entry_idx` points at `App::files`.
-/// Staged helper (render/keys land in Tasks 4-5); allow dead code until then.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub struct PickerState {
     pub query: String,
@@ -47,8 +45,6 @@ pub struct PickerState {
 pub struct App {
     pub mode: Mode,
     pub files: Vec<FileEntry>,
-    pub picker_index: usize,
-    /// Fuzzy state shadowing `files`/`picker_index` (migration lands in Task 6).
     pub picker: PickerState,
     pub lines: Vec<String>,
     pub filename: String,
@@ -94,19 +90,9 @@ impl App {
         self.wrap = !self.wrap;
         self.h_scroll = 0;
     }
-    /// Legacy index mover (render still reads `picker_index`; Task 5/6
-    /// migrate render to `picker.selected`). Allow dead code until then.
-    #[allow(dead_code)]
-    pub fn move_picker(&mut self, delta: isize) {
-        let n = self.picker_index as isize + delta;
-        let n = n.clamp(0, isize::MAX) as usize;
-        self.picker_index = clamp_selection(n, self.files.len());
-    }
     /// Re-rank `files` against the picker query. Keeps `selected` when it
     /// still points inside the new list, else clamps to 0. Resets the
     /// preview scroll when the selected file changes.
-    /// Staged helper (keys land in Task 4); allow dead code until then.
-    #[allow(dead_code)]
     pub fn picker_recompute(&mut self) {
         let before = self.picker_selected_entry();
         self.picker.filtered = filter_files(&self.files, &self.picker.query);
@@ -118,8 +104,6 @@ impl App {
         }
     }
     /// Move the fuzzy selection by `delta`, wrapping around. No-op when empty.
-    /// Staged helper (keys land in Task 4); allow dead code until then.
-    #[allow(dead_code)]
     pub fn picker_move(&mut self, delta: isize) {
         let len = self.picker.filtered.len();
         if len == 0 {
@@ -131,8 +115,6 @@ impl App {
         self.picker.preview_scroll = 0;
     }
     /// Clear the query and restore the full list at selection 0.
-    /// Staged helper (keys land in Task 4); allow dead code until then.
-    #[allow(dead_code)]
     pub fn picker_clear(&mut self) {
         self.picker.query.clear();
         self.picker_recompute();
@@ -351,14 +333,14 @@ use anyhow::{Context, Result};
 use std::path::Path;
 
 impl App {
-    pub fn new_picker(files: Vec<FileEntry>) -> Self {
+    pub fn new_picker(files: Vec<FileEntry>, truncated: bool) -> Self {
         let filtered = filter_files(&files, "");
         Self {
             mode: Mode::Picker,
             files,
-            picker_index: 0,
             picker: PickerState {
                 filtered,
+                truncated,
                 ..PickerState::default()
             },
             lines: vec![],
@@ -400,7 +382,6 @@ impl App {
         Ok(Self {
             mode: Mode::Viewer,
             files: vec![],
-            picker_index: 0,
             picker: PickerState::default(),
             lines,
             filename: path.display().to_string(),
@@ -439,7 +420,6 @@ mod tests {
         App {
             mode: Mode::Viewer,
             files: vec![],
-            picker_index: 0,
             picker: PickerState::default(),
             lines: (0..n).map(|i| format!("line {i}")).collect(),
             filename: "t.txt".into(),
@@ -483,14 +463,6 @@ mod tests {
         assert!(a.wrap);
         a.toggle_wrap();
         assert!(!a.wrap);
-    }
-    #[test]
-    fn picker_clamp_delegates() {
-        let mut a = viewer_app(0);
-        a.mode = Mode::Picker;
-        a.files = vec![];
-        a.move_picker(5);
-        assert_eq!(a.picker_index, 0);
     }
     #[test]
     fn cursor_clamps_to_text() {
@@ -541,10 +513,10 @@ mod tests {
         }
     }
     fn picker_app() -> App {
-        App::new_picker(vec![
-            picker_entry("docs/notes.md"),
-            picker_entry("src/main.rs"),
-        ])
+        App::new_picker(
+            vec![picker_entry("docs/notes.md"), picker_entry("src/main.rs")],
+            false,
+        )
     }
     #[test]
     fn picker_recompute_filters_and_clamps_selection() {

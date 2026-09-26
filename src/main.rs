@@ -47,8 +47,8 @@ fn main() -> Result<()> {
     let mut app = match cli.path {
         Some(p) => app::App::load_file(&p, false)?,
         None => {
-            let files = picker::list_files(std::path::Path::new("."))?;
-            app::App::new_picker(files)
+            let (files, truncated) = picker::discover_files(std::path::Path::new("."));
+            app::App::new_picker(files, truncated)
         }
     };
     let _guard = TerminalGuard::enter()?;
@@ -299,8 +299,8 @@ fn handle(app: &mut app::App, code: KeyCode, mods: KeyModifiers) -> Result<bool>
                         return Ok(false);
                     }
                     if app.from_picker && code == KeyCode::Esc {
-                        let files = picker::list_files(std::path::Path::new("."))?;
-                        *app = app::App::new_picker(files);
+                        let (files, truncated) = picker::discover_files(std::path::Path::new("."));
+                        *app = app::App::new_picker(files, truncated);
                         Ok(false)
                     } else {
                         Ok(true)
@@ -1311,7 +1311,7 @@ mod handle_tests {
         }
     }
     fn picker_app() -> app::App {
-        app::App::new_picker(vec![picker_entry("b.txt"), picker_entry("a.txt")])
+        app::App::new_picker(vec![picker_entry("b.txt"), picker_entry("a.txt")], false)
     }
     #[test]
     fn picker_typing_filters_and_ctrl_u_clears() {
@@ -1359,18 +1359,21 @@ mod handle_tests {
         let second = dir.join("second.txt");
         std::fs::write(&first, "first\n").unwrap();
         std::fs::write(&second, "second\n").unwrap();
-        let mut a = app::App::new_picker(vec![
-            crate::picker::FileEntry {
-                name: "first.txt".to_string(),
-                path: first,
-                size: 6,
-            },
-            crate::picker::FileEntry {
-                name: "second.txt".to_string(),
-                path: second,
-                size: 7,
-            },
-        ]);
+        let mut a = app::App::new_picker(
+            vec![
+                crate::picker::FileEntry {
+                    name: "first.txt".to_string(),
+                    path: first,
+                    size: 6,
+                },
+                crate::picker::FileEntry {
+                    name: "second.txt".to_string(),
+                    path: second,
+                    size: 7,
+                },
+            ],
+            false,
+        );
         // Select the second hit, not `files[0]`: Enter must follow selection.
         a.picker.selected = 1;
         handle(&mut a, KeyCode::Enter, KeyModifiers::NONE).unwrap();
@@ -1389,6 +1392,26 @@ mod handle_tests {
         let quit = handle(&mut a, KeyCode::Enter, KeyModifiers::NONE).unwrap();
         assert!(!quit);
         assert_eq!(a.mode, app::Mode::Picker);
+    }
+    #[test]
+    fn esc_from_viewer_returns_to_picker() {
+        // Recursive discovery: some entry descends into a subdir (two `/`
+        // in `./src/main.rs`); the old flat lister only yields one.
+        let mut a = viewer();
+        a.from_picker = true;
+        let quit = handle(&mut a, KeyCode::Esc, KeyModifiers::NONE).unwrap();
+        assert!(!quit);
+        assert_eq!(a.mode, app::Mode::Picker);
+        assert!(!a.files.is_empty());
+        assert!(
+            a.files.iter().any(|f| crate::picker::display_path(f)
+                .chars()
+                .filter(|&c| c == '/')
+                .count()
+                >= 2),
+            "expected recursive entries"
+        );
+        assert_eq!(a.picker.filtered.len(), a.files.len());
     }
     #[test]
     fn slash_enters_search_and_esc_restores() {
@@ -1815,6 +1838,25 @@ mod status_tests {
         assert!(!picker_preview_visible(79));
         assert!(picker_preview_visible(80));
         assert!(!picker_preview_visible(0));
+    }
+    #[test]
+    fn truncated_flag_reaches_prompt() {
+        let a = app::App::new_picker(
+            vec![crate::picker::FileEntry {
+                name: "a.txt".to_string(),
+                path: std::path::PathBuf::from("a.txt"),
+                size: 1,
+            }],
+            true,
+        );
+        assert!(a.picker.truncated);
+        let s = picker_prompt_line(
+            &a.picker.query,
+            a.picker.filtered.len(),
+            a.files.len(),
+            a.picker.truncated,
+        );
+        assert!(s.contains("50k"), "unexpected: {s}");
     }
     #[test]
     fn comment_prompt_format() {

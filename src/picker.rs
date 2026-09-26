@@ -1,4 +1,3 @@
-use anyhow::Result;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
@@ -10,48 +9,14 @@ pub struct FileEntry {
     pub size: u64,
 }
 
-/// List regular files in `dir`, sorted by name. Skips dirs/symlink-dirs/errors.
-pub fn list_files(dir: &Path) -> Result<Vec<FileEntry>> {
-    let mut out = Vec::new();
-    for entry in std::fs::read_dir(dir)? {
-        let entry = match entry {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-        let path = entry.path();
-        let meta = match entry.metadata() {
-            Ok(m) => m,
-            Err(_) => continue,
-        };
-        if !meta.is_file() {
-            continue;
-        }
-        let name = path
-            .file_name()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_default();
-        out.push(FileEntry {
-            name,
-            path,
-            size: meta.len(),
-        });
-    }
-    out.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(out)
-}
-
 /// Cap on picker entries; `discover_files` stops the walk here and reports
 /// `truncated = true` so the UI can show `[truncated at 50k]`.
-/// Staged helper (wired in Task 6); allow dead code until then.
-#[allow(dead_code)]
 pub const MAX_PICKER_FILES: usize = 50_000;
 
 /// Recursively list regular files under `root`, sorted by name.
 /// Shows hidden files but respects `.gitignore`/`.ignore`/excludes, and works
 /// outside git repos. Skips dirs, symlink-dirs, and errors; never aborts.
 /// Returns `(entries, truncated)`.
-/// Staged helper (wired in Task 6); allow dead code until then.
-#[allow(dead_code)]
 pub fn discover_files(root: &Path) -> (Vec<FileEntry>, bool) {
     let mut out = Vec::new();
     let mut truncated = false;
@@ -95,8 +60,6 @@ pub fn discover_files(root: &Path) -> (Vec<FileEntry>, bool) {
 
 /// One fuzzy hit: index into the entry slice, nucleo score, and matched
 /// columns as char indices into [`display_path`] (for highlight painting).
-/// Staged helper (wired in Task 3+); allow dead code until then.
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScoredMatch {
     pub entry_idx: usize,
@@ -106,8 +69,6 @@ pub struct ScoredMatch {
 
 /// Display string for ranking and painting: lossy path with `/` separators
 /// (so Windows paths rank like posix ones).
-/// Staged helper (wired in Task 3+); allow dead code until then.
-#[allow(dead_code)]
 pub fn display_path(entry: &FileEntry) -> String {
     entry.path.to_string_lossy().replace('\\', "/")
 }
@@ -115,7 +76,6 @@ pub fn display_path(entry: &FileEntry) -> String {
 /// Fuzzy-filter `entries` by `query` with nucleo (smart-case: any uppercase
 /// makes the match case-sensitive). Empty query returns every entry
 /// name-sorted with no columns. Results sort by score desc, name for ties.
-#[allow(dead_code)]
 pub fn filter_files(entries: &[FileEntry], query: &str) -> Vec<ScoredMatch> {
     if query.is_empty() {
         let mut idx: Vec<usize> = (0..entries.len()).collect();
@@ -130,8 +90,8 @@ pub fn filter_files(entries: &[FileEntry], query: &str) -> Vec<ScoredMatch> {
             .collect();
     }
     use nucleo_matcher::{
-        Config, Matcher, Utf32Str,
         pattern::{AtomKind, CaseMatching, Normalization, Pattern},
+        Config, Matcher, Utf32Str,
     };
     let mut matcher = Matcher::new(Config::DEFAULT.match_paths());
     let pattern = Pattern::new(
@@ -159,23 +119,11 @@ pub fn filter_files(entries: &[FileEntry], query: &str) -> Vec<ScoredMatch> {
         }
     }
     out.sort_by(|a, b| {
-        b.score.cmp(&a.score).then_with(|| {
-            entries[a.entry_idx]
-                .name
-                .cmp(&entries[b.entry_idx].name)
-        })
+        b.score
+            .cmp(&a.score)
+            .then_with(|| entries[a.entry_idx].name.cmp(&entries[b.entry_idx].name))
     });
     out
-}
-
-/// Clamp selection index into 0..len.
-/// Legacy helper (keys moved to `picker_move`; render migrates in Task 5/6).
-#[allow(dead_code)]
-pub fn clamp_selection(idx: usize, len: usize) -> usize {
-    if len == 0 {
-        return 0;
-    }
-    idx.min(len - 1)
 }
 
 // src/picker.rs tests
@@ -302,23 +250,13 @@ mod tests {
         assert_eq!(filter_files(&entries, "main").len(), 1);
     }
     #[test]
-    fn clamp_selection_empty_is_zero() {
-        assert_eq!(clamp_selection(5, 0), 0);
-    }    #[test]
-    fn clamp_selection_bounds() {
-        assert_eq!(clamp_selection(0, 3), 0);
-        assert_eq!(clamp_selection(99, 3), 2);
-        assert_eq!(clamp_selection(1, 3), 1);
-    }
-    #[test]
-    fn list_files_only_regular_sorted() {
-        let dir = std::env::temp_dir().join(format!("ctx_test_{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
+    fn discover_flat_names_stay_sorted() {
+        // `discover_files` superseded the flat lister; name order is pinned here.
+        let dir = unique_dir("flat");
         fs::create_dir_all(dir.join("subdir")).unwrap();
         fs::write(dir.join("b.txt"), "b").unwrap();
         fs::write(dir.join("a.txt"), "a").unwrap();
-        let files = list_files(&dir).unwrap();
+        let (files, _) = discover_files(&dir);
         let names: Vec<_> = files.iter().map(|f| f.name.clone()).collect();
         assert_eq!(names, vec!["a.txt".to_string(), "b.txt".to_string()]);
         let _ = fs::remove_dir_all(&dir);
