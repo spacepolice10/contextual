@@ -13,23 +13,11 @@ pub(super) fn handle_viewer(
             if app.commenting.is_some() {
                 match code {
                     KeyCode::Esc => {
-                        app.commenting = None;
+                        app.cancel_commenting();
                         return Ok(false);
                     }
                     KeyCode::Enter => {
-                        if let Some(p) = app.commenting.take() {
-                            let id = app.comments.len();
-                            app.comments.push(crate::app::Comment {
-                                id,
-                                file: app.filename.clone(),
-                                start: p.start,
-                                end: p.end,
-                                snippet: p.snippet,
-                                note: p.draft,
-                            });
-                        }
-                        app.visual = None;
-                        app.pending_count = None;
+                        app.commit_comment_draft();
                         return Ok(false);
                     }
                     KeyCode::Backspace => {
@@ -471,28 +459,11 @@ pub(super) fn handle_viewer(
                     Ok(false)
                 }
                 KeyCode::Char('n') => {
-                    let n = app.pending_count.take().unwrap_or(1);
-                    for _ in 0..n {
-                        if !app.search_matches.is_empty() {
-                            app.search_idx = (app.search_idx + 1) % app.search_matches.len();
-                            let (l, c) = app.search_matches[app.search_idx];
-                            app.cursor_line = l;
-                            app.cursor_col = c;
-                        }
-                    }
+                    app.step_search(1);
                     Ok(false)
                 }
                 KeyCode::Char('N') => {
-                    let n = app.pending_count.take().unwrap_or(1);
-                    for _ in 0..n {
-                        if !app.search_matches.is_empty() {
-                            app.search_idx = (app.search_idx + app.search_matches.len() - 1)
-                                % app.search_matches.len();
-                            let (l, c) = app.search_matches[app.search_idx];
-                            app.cursor_line = l;
-                            app.cursor_col = c;
-                        }
-                    }
+                    app.step_search(-1);
                     Ok(false)
                 }
                 KeyCode::Char('C')

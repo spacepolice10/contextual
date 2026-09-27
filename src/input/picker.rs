@@ -34,20 +34,7 @@ pub(super) fn handle_picker(
                     app.picker_recompute();
                     Ok(false)
                 }
-                KeyCode::Enter => {
-                    let hit = app
-                        .picker
-                        .filtered
-                        .get(app.picker.selected)
-                        .map(|m| m.entry_idx);
-                    match hit.and_then(|i| app.files.get(i).cloned()) {
-                        Some(f) => {
-                            *app = crate::app::App::load_file(&f.path, true)?;
-                            Ok(false)
-                        }
-                        None => Ok(false),
-                    }
-                }
+                KeyCode::Enter => app.open_selected_entry(),
                 KeyCode::Esc => {
                     if app.picker.query.is_empty() {
                         Ok(true)

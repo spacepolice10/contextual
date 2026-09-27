@@ -327,6 +327,60 @@ impl App {
         self.saved_cursor = None;
         self.saved_scroll = None;
     }
+    /// Open the selected picker entry, replacing viewer state.
+    /// Never quits (`Ok(false)`); empty selection is a noop.
+    pub fn open_selected_entry(&mut self) -> Result<bool> {
+        let hit = self
+            .picker
+            .filtered
+            .get(self.picker.selected)
+            .map(|m| m.entry_idx);
+        match hit.and_then(|i| self.files.get(i).cloned()) {
+            Some(f) => {
+                *self = Self::load_file(&f.path, true)?;
+                Ok(false)
+            }
+            None => Ok(false),
+        }
+    }
+    /// Drop the draft input, keeping the visual selection.
+    pub fn cancel_commenting(&mut self) {
+        self.commenting = None;
+    }
+    /// Save the draft to the memory buffer, clearing visual + count.
+    /// Empty drafts save too (note may be `""`).
+    pub fn commit_comment_draft(&mut self) {
+        if let Some(p) = self.commenting.take() {
+            let id = self.comments.len();
+            self.comments.push(Comment {
+                id,
+                file: self.filename.clone(),
+                start: p.start,
+                end: p.end,
+                snippet: p.snippet,
+                note: p.draft,
+            });
+        }
+        self.visual = None;
+        self.pending_count = None;
+    }
+    /// Step through committed search matches (`1` forward like `n`,
+    /// `-1` back like `N`), honouring a pending count prefix.
+    /// Noop without matches.
+    pub fn step_search(&mut self, dir: isize) {
+        let n = self.pending_count.take().unwrap_or(1);
+        for _ in 0..n {
+            if self.search_matches.is_empty() {
+                continue;
+            }
+            let len = self.search_matches.len();
+            self.search_idx =
+                (self.search_idx as isize + dir).rem_euclid(len as isize) as usize;
+            let (l, c) = self.search_matches[self.search_idx];
+            self.cursor_line = l;
+            self.cursor_col = c;
+        }
+    }
 }
 
 use anyhow::{Context, Result};
@@ -554,6 +608,63 @@ mod tests {
         assert!(a.picker.query.is_empty());
         assert_eq!(a.picker.selected, 0);
         assert_eq!(a.picker.filtered.len(), 2);
+    }
+    #[test]
+    fn open_selected_entry_empty_is_noop() {
+        let mut a = App::new_picker(vec![], false);
+        let quit = a.open_selected_entry().unwrap();
+        assert!(!quit);
+        assert_eq!(a.mode, Mode::Picker);
+    }
+    #[test]
+    fn cancel_commenting_keeps_visual() {
+        use crate::select::{SelectKind, Selection};
+        let mut a = viewer_app(1);
+        a.visual = Some(Selection { anchor: (0, 0), kind: SelectKind::Char });
+        a.commenting = Some(PendingComment {
+            snippet: "hi".to_string(),
+            start: (0, 0),
+            end: (0, 2),
+            draft: "x".to_string(),
+        });
+        a.cancel_commenting();
+        assert!(a.commenting.is_none());
+        assert!(a.visual.is_some());
+    }
+    #[test]
+    fn commit_comment_draft_saves_and_clears() {
+        let mut a = viewer_app(1);
+        a.lines = vec!["hello".to_string()];
+        a.commenting = Some(PendingComment {
+            snippet: "hell".to_string(),
+            start: (0, 0),
+            end: (0, 4),
+            draft: "note".to_string(),
+        });
+        a.pending_count = Some(3);
+        a.commit_comment_draft();
+        assert_eq!(a.comments.len(), 1);
+        assert_eq!(a.comments[0].note, "note");
+        assert!(a.commenting.is_none());
+        assert!(a.visual.is_none());
+        assert!(a.pending_count.is_none());
+    }
+    #[test]
+    fn step_search_advances_and_wraps() {
+        let mut a = viewer_app(3);
+        a.search_matches = vec![(0, 0), (1, 1), (2, 2)];
+        a.search_idx = 0;
+        a.step_search(1);
+        assert_eq!((a.cursor_line, a.cursor_col), (1, 1));
+        a.step_search(-1);
+        assert_eq!((a.cursor_line, a.cursor_col), (0, 0));
+        a.step_search(-1);
+        assert_eq!((a.cursor_line, a.cursor_col), (2, 2));
+        // Empty matches: noop, keeps count consumed.
+        a.search_matches.clear();
+        a.pending_count = Some(2);
+        a.step_search(1);
+        assert!(a.pending_count.is_none());
     }
     #[test]
     fn word_forward_basic() {
