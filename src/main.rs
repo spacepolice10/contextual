@@ -5,6 +5,7 @@ mod picker;
 mod search;
 mod select;
 mod tui;
+mod ui;
 mod viewer;
 
 use anyhow::{Context, Result};
@@ -18,6 +19,9 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Terminal,
 };
+use crate::ui::paint::{paint_ranges, paint_search_ranges, paint_selection_ranges};
+use crate::ui::sidebar::sidebar_lines;
+use crate::ui::status::{comment_prompt, comments_tag, status_line, viewer_hint, visual_tag};
 use std::{io, time::Duration};
 
 fn main() -> Result<()> {
@@ -625,127 +629,6 @@ fn handle(app: &mut app::App, code: KeyCode, mods: KeyModifiers) -> Result<bool>
     }
 }
 
-/// Repaint exact-match ranges with vim-like Search style (yellow bg).
-/// Ranges are chunk-relative char offsets into the concatenated spans.
-fn paint_search_ranges(spans: Vec<Span<'static>>, ranges: &[(usize, usize)]) -> Vec<Span<'static>> {
-    paint_ranges(spans, ranges, Style::default().bg(Color::Yellow).fg(Color::Black))
-}
-
-/// Repaint selection ranges with vim-like Visual style (blue bg).
-/// Same chunk-relative contract as [`paint_search_ranges`].
-fn paint_selection_ranges(
-    spans: Vec<Span<'static>>,
-    ranges: &[(usize, usize)],
-) -> Vec<Span<'static>> {
-    paint_ranges(spans, ranges, Style::default().bg(Color::Blue).fg(Color::White))
-}
-
-/// Shared cell repaint for chunk-relative ranges: explode spans to styled
-/// chars, overwrite the style in each range, re-merge adjacent equals.
-fn paint_ranges(
-    spans: Vec<Span<'static>>,
-    ranges: &[(usize, usize)],
-    style: Style,
-) -> Vec<Span<'static>> {
-    let mut cells: Vec<(char, Style)> = Vec::new();
-    for s in &spans {
-        for c in s.content.chars() {
-            cells.push((c, s.style));
-        }
-    }
-    for &(a, b) in ranges {
-        for i in a.min(cells.len())..b.min(cells.len()) {
-            cells[i].1 = style;
-        }
-    }
-    let mut out: Vec<Span<'static>> = Vec::new();
-    for (c, st) in cells {
-        let t = c.to_string();
-        match out.last_mut() {
-            Some(last) if last.style == st => last.content.to_mut().push_str(&t),
-            _ => out.push(Span::styled(t, st)),
-        }
-    }
-    out
-}
-
-fn viewer_hint(searching: bool) -> &'static str {
-    if searching {
-        "Enter ok · Esc cancel"
-    } else {
-        "j/k move · ^F/^B/^D/^U half · w/b/e word · 0^$ line · / n/N · g/G · ^W wrap · v/V select · Enter comment · C sidebar · q quit"
-    }
-}
-
-/// Status mode tag for an active visual selection (`""` when none).
-/// Commenting input covers its own `Comment…` tag via [`comment_prompt`].
-fn visual_tag(visual: Option<crate::select::Selection>) -> &'static str {
-    match visual {
-        Some(s) if s.kind == crate::select::SelectKind::Line => "--VISUAL LINE--",
-        Some(_) => "--VISUAL--",
-        None => "",
-    }
-}
-
-/// Trailing status count (`[n comments]`), shown once comments exist.
-fn comments_tag(n: usize) -> String {
-    format!(" [{n} comments]")
-}
-
-/// Status row 1 while typing a note: `Comment on <file:line>: <draft>`
-/// with a 1-based line; the block cursor cell is appended by `render`.
-fn comment_prompt(file: &str, line: usize, draft: &str) -> String {
-    format!("Comment on {file}:{line}: {draft}")
-}
-
-/// Sidebar rows for the comments panel: per comment, three rows —
-/// dim `file: sL:sC → eL:eC` caption (1-based), blueish truncated
-/// snippet (flattened to one row, cut to `width` + `…`), then the full
-/// note. Shows the last `height / 3` comments (at least one, no scroll).
-fn sidebar_lines(app: &app::App, height: usize, width: usize) -> Vec<Line<'static>> {
-    if app.comments.is_empty() {
-        return vec![Line::from(Span::raw(
-            "No comments — v select, Enter comment",
-        ))];
-    }
-    const ROWS_PER_ITEM: usize = 3;
-    let w = width.max(1);
-    let n = (height / ROWS_PER_ITEM).max(1).min(app.comments.len());
-    let dim = Style::default().fg(Color::DarkGray);
-    let snip_style = Style::default().fg(Color::LightBlue);
-    app.comments[app.comments.len() - n..]
-        .iter()
-        .flat_map(|c| {
-            let flat: String = c
-                .snippet
-                .replace('\r', "")
-                .replace('\n', " ")
-                .chars()
-                .collect();
-            let snip = if flat.chars().count() > w {
-                format!("{}…", flat.chars().take(w).collect::<String>())
-            } else {
-                flat
-            };
-            vec![
-                Line::from(Span::styled(
-                    format!(
-                        "{}: {}:{} → {}:{}",
-                        c.file,
-                        c.start.0 + 1,
-                        c.start.1 + 1,
-                        c.end.0 + 1,
-                        c.end.1 + 1,
-                    ),
-                    dim,
-                )),
-                Line::from(Span::styled(snip, snip_style)),
-                Line::from(Span::raw(c.note.clone())),
-            ]
-        })
-        .collect()
-}
-
 /// Gutter number (vim `relativenumber` style): the cursor's own line
 /// shows its absolute 1-based number, every other line shows the
 /// distance from the cursor.
@@ -756,31 +639,6 @@ fn gutter_number(lidx: usize, cursor_line: usize) -> usize {
         lidx.abs_diff(cursor_line)
     }
 }
-/// not bytes). Hint keeps a subtle style; truncates on narrow widths.
-/// Left status + right-aligned hint padded to `width` chars (char count,
-fn status_line(width: usize, left: &str, right: &str) -> Line<'static> {
-    let subtle = Style::default().fg(Color::DarkGray);
-    let lw = left.chars().count();
-    if width == 0 {
-        return Line::from(vec![Span::raw(left.to_string())]);
-    }
-    if lw >= width {
-        let t: String = left.chars().take(width).collect();
-        return Line::from(vec![Span::raw(t)]);
-    }
-    let rw = right.chars().count();
-    if lw + 1 + rw <= width {
-        let mut l = left.to_string();
-        l.push_str(&" ".repeat(width - lw - rw));
-        return Line::from(vec![Span::raw(l), Span::styled(right.to_string(), subtle)]);
-    }
-    let keep = width.saturating_sub(lw + 1);
-    let t: String = right.chars().take(keep).collect();
-    let mut l = left.to_string();
-    l.push(' ');
-    Line::from(vec![Span::raw(l), Span::styled(t, subtle)])
-}
-
 /// Picker prompt text: `> query  n/m` with `[no matches]` / `[truncated…]`
 /// notes. The block cursor cell is appended by `render`.
 fn picker_prompt_line(query: &str, filtered: usize, total: usize, truncated: bool) -> String {
@@ -1723,55 +1581,12 @@ mod status_tests {
     fn viewer() -> app::App {
         app::App::load_file(std::path::Path::new("Cargo.toml"), false).unwrap()
     }
-    fn line_text(line: &Line) -> String {
-        line.spans.iter().map(|s| s.content.to_string()).collect()
-    }
     #[test]
     fn status_shows_visual_and_comment_count() {
         let mut a = viewer();
         a.lines = vec!["hi".to_string()];
         handle(&mut a, KeyCode::Char('v'), KeyModifiers::NONE).unwrap();
         assert!(viewer_hint(false).contains("C"));
-    }
-    #[test]
-    fn hint_lists_compact_navigation_keys() {
-        let h = viewer_hint(false);
-        for k in [
-            "j/k", "^F/^B", "^D/^U", "w/b/e", "0^$", "/ n/N", "g/G", "^W wrap", "q quit",
-        ] {
-            assert!(h.contains(k), "hint missing {k}: {h}");
-        }
-    }
-    #[test]
-    fn hint_searching_shows_confirm_cancel() {
-        let h = viewer_hint(true);
-        assert!(h.contains("Enter") && h.contains("Esc"), "unexpected: {h}");
-    }
-    #[test]
-    fn status_line_pads_right_hint_to_width_with_subtle_style() {
-        let line = status_line(20, "left", "right");
-        let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
-        assert_eq!(text.chars().count(), 20);
-        assert!(text.starts_with("left"));
-        assert!(text.ends_with("right"));
-        let right_style = line.spans.last().unwrap().style;
-        assert_eq!(right_style.fg, Some(Color::DarkGray));
-    }
-    #[test]
-    fn status_line_truncates_hint_on_narrow_width() {
-        let line = status_line(6, "left", "verylonghint");
-        let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
-        assert_eq!(text.chars().count(), 6);
-        assert!(text.starts_with("left"));
-    }
-    #[test]
-    fn visual_tag_names_char_and_line_modes() {
-        use crate::select::{SelectKind, Selection};
-        let char_sel = Some(Selection { anchor: (0, 0), kind: SelectKind::Char });
-        let line_sel = Some(Selection { anchor: (0, 0), kind: SelectKind::Line });
-        assert_eq!(visual_tag(char_sel), "--VISUAL--");
-        assert_eq!(visual_tag(line_sel), "--VISUAL LINE--");
-        assert_eq!(visual_tag(None), "");
     }
     #[test]
     fn gutter_number_relative_with_absolute_cursor_row() {
@@ -1784,11 +1599,6 @@ mod status_tests {
         // Cursor on first line.
         assert_eq!(gutter_number(0, 0), 1);
         assert_eq!(gutter_number(2, 0), 2);
-    }
-    #[test]
-    fn comments_tag_counts() {
-        assert_eq!(comments_tag(0), " [0 comments]");
-        assert_eq!(comments_tag(2), " [2 comments]");
     }
     #[test]
     fn picker_prompt_shows_count() {
@@ -1890,69 +1700,6 @@ mod status_tests {
             a.picker.truncated,
         );
         assert!(s.contains("50k"), "unexpected: {s}");
-    }
-    #[test]
-    fn comment_prompt_format() {
-        assert_eq!(
-            comment_prompt("Cargo.toml", 3, "ok"),
-            "Comment on Cargo.toml:3: ok"
-        );
-    }
-    #[test]
-    fn selection_paint_uses_blue_bg() {
-        let spans = vec![Span::raw("hello".to_string())];
-        let out = paint_selection_ranges(spans, &[(1, 4)]);
-        let text: String = out.iter().map(|s| s.content.to_string()).collect();
-        assert_eq!(text, "hello");
-        assert!(
-            out.iter().any(|s| s.style.bg == Some(Color::Blue)),
-            "no blue cell painted"
-        );
-        assert_eq!(out.iter().filter(|s| s.style.bg == Some(Color::Blue)).count(), 1);
-    }
-    #[test]
-    fn sidebar_lists_comment_rows() {
-        let mut a = viewer();
-        a.comments.push(app::Comment {
-            id: 0,
-            file: "f.rs".to_string(),
-            start: (0, 0),
-            end: (0, 2),
-            snippet: "hi".to_string(),
-            note: "n".to_string(),
-        });
-        let rows = sidebar_lines(&a, 10, 40);
-        assert_eq!(rows.len(), 3);
-        let text: String = rows.iter().map(line_text).collect();
-        assert!(text.contains("f.rs: 1:1 → 1:3"), "unexpected: {text}");
-        assert!(text.contains("hi"), "unexpected: {text}");
-        assert!(text.contains('n'), "unexpected: {text}");
-        assert_eq!(rows[0].spans[0].style.fg, Some(Color::DarkGray));
-        assert_eq!(rows[1].spans[0].style.fg, Some(Color::LightBlue));
-    }
-    #[test]
-    fn sidebar_snippet_truncates_to_width() {
-        let mut a = viewer();
-        a.comments.push(app::Comment {
-            id: 0,
-            file: "f.rs".to_string(),
-            start: (0, 0),
-            end: (0, 10),
-            snippet: "abcdefghij".to_string(),
-            note: "n".to_string(),
-        });
-        let rows = sidebar_lines(&a, 10, 4);
-        assert_eq!(rows.len(), 3);
-        let snip: String = rows[1].spans.iter().map(|s| s.content.to_string()).collect();
-        assert_eq!(snip, "abcd…");
-    }
-    #[test]
-    fn sidebar_empty_shows_help() {
-        let a = viewer();
-        assert!(a.comments.is_empty());
-        let rows = sidebar_lines(&a, 10, 40);
-        let text: String = rows.iter().map(line_text).collect();
-        assert!(text.contains("No comments"), "unexpected: {text}");
     }
     #[test]
     fn render_smoke_visual_sidebar_commenting() {
