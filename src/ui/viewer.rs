@@ -359,9 +359,9 @@ mod tests {
         a.lines = vec!["hello world".to_string(), "second line".to_string()];
         a.lang = None;
         a.highlighted = None;
-        crate::handle(&mut a, KeyCode::Char('v'), KeyModifiers::NONE).unwrap();
-        crate::handle(&mut a, KeyCode::Char('e'), KeyModifiers::NONE).unwrap();
-        crate::handle(&mut a, KeyCode::Char('j'), KeyModifiers::NONE).unwrap();
+        crate::input::handle(&mut a, KeyCode::Char('v'), KeyModifiers::NONE).unwrap();
+        crate::input::handle(&mut a, KeyCode::Char('e'), KeyModifiers::NONE).unwrap();
+        crate::input::handle(&mut a, KeyCode::Char('j'), KeyModifiers::NONE).unwrap();
         assert!(a.visual.is_some());
         a.show_sidebar = true;
         a.comments.push(crate::app::Comment {
