@@ -1,8 +1,10 @@
 mod app;
+mod cli;
 mod highlight;
 mod picker;
 mod search;
 mod select;
+mod tui;
 mod viewer;
 
 use anyhow::{Context, Result};
@@ -16,34 +18,10 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Terminal,
 };
-use std::{io, path::PathBuf, time::Duration};
-
-#[derive(Parser, Debug)]
-#[command(name = "contextual", about = "Minimal terminal text viewer")]
-struct Cli {
-    /// File to open. If omitted, shows picker for current directory.
-    path: Option<PathBuf>,
-}
-
-struct TerminalGuard;
-impl TerminalGuard {
-    fn enter() -> Result<Self> {
-        crossterm::terminal::enable_raw_mode().context("enable raw mode")?;
-        let mut out = io::stdout();
-        crossterm::execute!(out, crossterm::terminal::EnterAlternateScreen)
-            .context("enter alt screen")?;
-        Ok(Self)
-    }
-}
-impl Drop for TerminalGuard {
-    fn drop(&mut self) {
-        let _ = crossterm::terminal::disable_raw_mode();
-        let _ = crossterm::execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen);
-    }
-}
+use std::{io, time::Duration};
 
 fn main() -> Result<()> {
-    let cli = Cli::parse();
+    let cli = cli::Cli::parse();
     let mut app = match cli.path {
         Some(p) => app::App::load_file(&p, false)?,
         None => {
@@ -51,7 +29,7 @@ fn main() -> Result<()> {
             app::App::new_picker(files, truncated)
         }
     };
-    let _guard = TerminalGuard::enter()?;
+    let _guard = tui::TerminalGuard::enter()?;
     let backend = CrosstermBackend::new(io::stdout());
     let mut term = Terminal::new(backend).context("create terminal")?;
     loop {
