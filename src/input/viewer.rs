@@ -812,4 +812,12 @@ mod tests {
         assert!(a.visual.is_some());
         assert!(a.comments.is_empty());
     }
+    #[test]
+    fn status_shows_visual_and_comment_count() {
+        use crate::ui::status::viewer_hint;
+        let mut a = viewer();
+        a.lines = vec!["hi".to_string()];
+        handle(&mut a, KeyCode::Char('v'), KeyModifiers::NONE).unwrap();
+        assert!(viewer_hint(false).contains("C"));
+    }
 }

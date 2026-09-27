@@ -51,22 +51,3 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
         Mode::Viewer => crate::ui::viewer::render_viewer(f, app, area),
     }
 }
-
-
-
-#[cfg(test)]
-mod status_tests {
-    use super::*;
-    use crossterm::event::{KeyCode, KeyModifiers};
-    fn viewer() -> app::App {
-        app::App::load_file(std::path::Path::new("Cargo.toml"), false).unwrap()
-    }
-    #[test]
-    fn status_shows_visual_and_comment_count() {
-        use crate::ui::status::viewer_hint;
-        let mut a = viewer();
-        a.lines = vec!["hi".to_string()];
-        crate::input::handle(&mut a, KeyCode::Char('v'), KeyModifiers::NONE).unwrap();
-        assert!(viewer_hint(false).contains("C"));
-    }
-}
