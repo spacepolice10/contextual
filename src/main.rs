@@ -768,8 +768,18 @@ fn sidebar_lines(app: &app::App, height: usize, width: usize) -> Vec<Line<'stati
         .collect()
 }
 
-/// Left status + right-aligned hint padded to `width` chars (char count,
+/// Gutter number (vim `relativenumber` style): the cursor's own line
+/// shows its absolute 1-based number, every other line shows the
+/// distance from the cursor.
+fn gutter_number(lidx: usize, cursor_line: usize) -> usize {
+    if lidx == cursor_line {
+        lidx + 1
+    } else {
+        lidx.abs_diff(cursor_line)
+    }
+}
 /// not bytes). Hint keeps a subtle style; truncates on narrow widths.
+/// Left status + right-aligned hint padded to `width` chars (char count,
 fn status_line(width: usize, left: &str, right: &str) -> Line<'static> {
     let subtle = Style::default().fg(Color::DarkGray);
     let lw = left.chars().count();
@@ -1200,7 +1210,11 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
                     }
                 };
                 let mut spans = vec![Span::styled(
-                    format!("{:>width$} ", lidx + 1, width = gutter - 1),
+                    format!(
+                        "{:>width$} ",
+                        gutter_number(*lidx, app.cursor_line),
+                        width = gutter - 1
+                    ),
                     Style::default().fg(Color::DarkGray),
                 )];
                 spans.extend(body_span);
@@ -1780,6 +1794,18 @@ mod status_tests {
         assert_eq!(visual_tag(char_sel), "--VISUAL--");
         assert_eq!(visual_tag(line_sel), "--VISUAL LINE--");
         assert_eq!(visual_tag(None), "");
+    }
+    #[test]
+    fn gutter_number_relative_with_absolute_cursor_row() {
+        // Cursor on line 5 (idx 4): own row absolute, others distance.
+        assert_eq!(gutter_number(4, 4), 5);
+        assert_eq!(gutter_number(0, 4), 4);
+        assert_eq!(gutter_number(3, 4), 1);
+        assert_eq!(gutter_number(5, 4), 1);
+        assert_eq!(gutter_number(9, 4), 5);
+        // Cursor on first line.
+        assert_eq!(gutter_number(0, 0), 1);
+        assert_eq!(gutter_number(2, 0), 2);
     }
     #[test]
     fn comments_tag_counts() {
