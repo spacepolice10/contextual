@@ -126,6 +126,45 @@ pub fn filter_files(entries: &[FileEntry], query: &str) -> Vec<ScoredMatch> {
     out
 }
 
+/// Picker prompt text: `> query  n/m` with `[no matches]` / `[truncated…]`
+/// notes. The block cursor cell is appended by `render`.
+pub fn picker_prompt_line(query: &str, filtered: usize, total: usize, truncated: bool) -> String {
+    let mut s = format!("> {query}  {filtered}/{total}");
+    if filtered == 0 {
+        s.push_str("  [no matches]");
+    }
+    if truncated {
+        s.push_str("  [truncated at 50k]");
+    }
+    s
+}
+
+/// Preview pane visibility: hidden on narrow terminals (results full-width).
+pub fn picker_preview_visible(width: usize) -> bool {
+    width >= 80
+}
+
+/// Max preview bytes (alongside the `max_lines` cap at call sites).
+pub const PREVIEW_MAX_BYTES: usize = 100 * 1024;
+
+/// Capped lossy preview read: at most `PREVIEW_MAX_BYTES` off disk, then
+/// `max_lines` lines. Returns lines plus a `[binary preview]` note when NUL
+/// bytes are present. Never fails: unreadable files yield empty lines.
+/// The byte cap binds at read time (not after) so selecting a huge file
+/// cannot stall the render loop.
+pub fn read_preview_lines(path: &Path, max_lines: usize) -> (Vec<String>, Option<String>) {
+    use std::io::Read;
+    let mut buf = Vec::new();
+    if let Ok(f) = std::fs::File::open(path) {
+        let _ = f.take(PREVIEW_MAX_BYTES as u64).read_to_end(&mut buf);
+    }
+    let text = String::from_utf8_lossy(&buf).to_string();
+    let binary = buf.contains(&0);
+    let lines: Vec<String> = text.lines().take(max_lines).map(|s| s.to_string()).collect();
+    let note = binary.then(|| "[binary preview]".to_string());
+    (lines, note)
+}
+
 // src/picker.rs tests
 #[cfg(test)]
 mod tests {
@@ -260,5 +299,86 @@ mod tests {
         let names: Vec<_> = files.iter().map(|f| f.name.clone()).collect();
         assert_eq!(names, vec!["a.txt".to_string(), "b.txt".to_string()]);
         let _ = fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn picker_prompt_shows_count() {
+        let s = picker_prompt_line("mr", 3, 120, false);
+        assert!(s.contains("> mr"), "unexpected: {s}");
+        assert!(s.contains("3/120"), "unexpected: {s}");
+    }
+    #[test]
+    fn picker_prompt_flags_empty_and_truncated() {
+        let s = picker_prompt_line("zzz", 0, 40, false);
+        assert!(s.contains("[no matches]"), "unexpected: {s}");
+        let s = picker_prompt_line("", 50_000, 50_000, true);
+        assert!(s.contains("[truncated at 50k]"), "unexpected: {s}");
+    }
+    #[test]
+    fn picker_preview_cap_truncates() {
+        let dir = unique_dir("prev");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("big.txt");
+        let body: String = (0..1000).map(|i| format!("line {i}\n")).collect();
+        std::fs::write(&path, body).unwrap();
+        let (lines, note) = read_preview_lines(&path, 200);
+        assert_eq!(lines.len(), 200);
+        assert_eq!(lines[0], "line 0");
+        assert!(note.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn picker_preview_read_is_byte_capped() {
+        // 300KB file with a huge line cap: only the 100KB byte cap may bind.
+        let dir = unique_dir("prevcap");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("wide.bin");
+        let chunk = "x".repeat(1023) + "\n";
+        let body = chunk.repeat(300);
+        assert!(body.len() >= 300 * 1024);
+        std::fs::write(&path, body.as_bytes()).unwrap();
+        let (lines, _) = read_preview_lines(&path, usize::MAX);
+        let total: usize = lines.iter().map(|l| l.len()).sum();
+        assert!(
+            total <= 100 * 1024,
+            "preview read {total} bytes without a bound"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn picker_preview_binary_shows_note() {
+        let dir = unique_dir("prevbin");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("bin.dat");
+        std::fs::write(&path, b"ab\x00cd\nline2\n").unwrap();
+        let (lines, note) = read_preview_lines(&path, 200);
+        assert!(!lines.is_empty());
+        assert!(lines.len() <= 200);
+        assert_eq!(note.as_deref(), Some("[binary preview]"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn picker_preview_narrow_hidden() {
+        assert!(!picker_preview_visible(79));
+        assert!(picker_preview_visible(80));
+        assert!(!picker_preview_visible(0));
+    }
+    #[test]
+    fn truncated_flag_reaches_prompt() {
+        let a = crate::app::App::new_picker(
+            vec![FileEntry {
+                name: "a.txt".to_string(),
+                path: std::path::PathBuf::from("a.txt"),
+                size: 1,
+            }],
+            true,
+        );
+        assert!(a.picker.truncated);
+        let s = picker_prompt_line(
+            &a.picker.query,
+            a.picker.filtered.len(),
+            a.files.len(),
+            a.picker.truncated,
+        );
+        assert!(s.contains("50k"), "unexpected: {s}");
     }
 }
