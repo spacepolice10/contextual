@@ -1,3 +1,4 @@
 pub mod paint;
+pub mod picker;
 pub mod sidebar;
 pub mod status;
