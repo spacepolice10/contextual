@@ -54,7 +54,7 @@ pub fn render_flow_chart<'a>(graph: &'a PlanGraph, _area: Rect) -> Vec<Line<'a>>
         graph.nodes.iter().filter(|n| n.parent.is_none()).collect();
     for (i, root) in roots.iter().enumerate() {
         let is_last = i == roots.len() - 1;
-        render_flow_node(graph, root, "", is_last, &mut lines);
+        render_flow_node(graph, root, "", is_last, true, &mut lines);
     }
     lines
 }
@@ -64,9 +64,10 @@ fn render_flow_node<'a>(
     node: &'a crate::plan::model::PlanNode,
     prefix: &str,
     is_last: bool,
+    is_root: bool,
     lines: &mut Vec<Line<'a>>,
 ) {
-    let connector = if prefix.is_empty() {
+    let connector = if is_root {
         ""
     } else if is_last {
         "└─ "
@@ -87,7 +88,7 @@ fn render_flow_node<'a>(
         .iter()
         .filter(|n| n.parent == Some(node.id))
         .collect();
-    let child_prefix = if prefix.is_empty() {
+    let child_prefix = if is_root {
         String::new()
     } else if is_last {
         format!("{}    ", prefix)
@@ -96,7 +97,7 @@ fn render_flow_node<'a>(
     };
     for (i, child) in children.iter().enumerate() {
         let child_is_last = i == children.len() - 1;
-        render_flow_node(graph, child, &child_prefix, child_is_last, lines);
+        render_flow_node(graph, child, &child_prefix, child_is_last, false, lines);
     }
 }
 
@@ -160,6 +161,39 @@ mod tests {
         g.create_node("Root", None).unwrap();
         let lines = render_flow_chart(&g, Rect::new(0, 0, 80, 24));
         assert!(!lines.is_empty());
+    }
+
+    #[test]
+    fn render_flow_chart_shows_tree_connectors() {
+        let mut g = PlanGraph::new();
+        let root = g.create_node("Root", None).unwrap();
+        g.create_node("Child A", Some(root)).unwrap();
+        g.create_node("Child B", Some(root)).unwrap();
+        let lines = render_flow_chart(&g, Rect::new(0, 0, 80, 24));
+        let text: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+        // Root renders bare; children carry branch connectors.
+        assert!(text.iter().any(|l| l == "Root"), "lines: {text:?}");
+        assert!(text.iter().any(|l| l == "├─ Child A"), "lines: {text:?}");
+        assert!(text.iter().any(|l| l == "└─ Child B"), "lines: {text:?}");
+    }
+
+    #[test]
+    fn render_flow_chart_nests_grandchildren() {
+        let mut g = PlanGraph::new();
+        let root = g.create_node("Root", None).unwrap();
+        let child = g.create_node("Child", Some(root)).unwrap();
+        g.create_node("Grandchild", Some(child)).unwrap();
+        let lines = render_flow_chart(&g, Rect::new(0, 0, 80, 24));
+        let text: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+        assert_eq!(
+            text,
+            vec![
+                "Root".to_string(),
+                "└─ Child".to_string(),
+                "    └─ Grandchild".to_string()
+            ],
+            "lines: {text:?}"
+        );
     }
 
     #[test]
