@@ -68,7 +68,9 @@ fn handle_plan_command(
 
     let cmd = match subcmd {
         PlanSubcommand::Plan => {
-            // Open plan mode in TUI — handled by caller
+            // TUI entry for Plan mode happens through the picker
+            // (open a .plan.json file); there is nothing to run headlessly.
+            println!("Plan TUI: run without arguments and open a .plan.json file from the picker.");
             return Ok(());
         }
         PlanSubcommand::PlanCreate { path } => {
@@ -114,7 +116,9 @@ fn handle_plan_command(
 
     let result = execute_command(&mut graph, &cmd)?;
     println!("{}", result);
-    graph.save(path)?;
+    if crate::plan::commands::is_mutation(&cmd) {
+        graph.save(path)?;
+    }
     Ok(())
 }
 

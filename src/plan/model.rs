@@ -177,6 +177,11 @@ impl PlanGraph {
     pub fn save(&self, path: &Path) -> Result<(), PlanError> {
         let json = serde_json::to_string_pretty(self)
             .map_err(PlanError::Json)?;
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent).map_err(PlanError::Io)?;
+            }
+        }
         std::fs::write(path, json).map_err(PlanError::Io)?;
         Ok(())
     }
@@ -310,6 +315,20 @@ mod tests {
         assert_eq!(loaded.nodes[1].parent, Some(root));
         assert_eq!(loaded.cross_links.len(), 1);
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn save_creates_missing_parent_dirs() {
+        let dir = std::env::temp_dir().join("ctx_plan_nonexistent_parent");
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("sub").join("plan.json");
+        let mut g = PlanGraph::new();
+        g.create_node("Auto", None).unwrap();
+        g.save(&path).unwrap();
+        let loaded = PlanGraph::load(&path).unwrap();
+        assert_eq!(loaded.nodes.len(), 1);
+        assert_eq!(loaded.nodes[0].title, "Auto");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

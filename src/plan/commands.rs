@@ -114,8 +114,23 @@ pub fn parse_command(input: &str) -> Result<PlanCommand, String> {
     }
 }
 
-pub fn execute_command(graph: &mut PlanGraph, cmd: &PlanCommand) -> Result<String, PlanError> {
-    match cmd {
+/// True when executing `cmd` mutates the graph and the caller must persist.
+/// Reads (`node_list`, `node_show`) and file commands (which manage their
+/// own files) return false.
+pub fn is_mutation(cmd: &PlanCommand) -> bool {
+    matches!(
+        cmd,
+        PlanCommand::NodeCreate { .. }
+            | PlanCommand::NodeUpdate { .. }
+            | PlanCommand::NodeDelete { .. }
+            | PlanCommand::LinkCreate { .. }
+            | PlanCommand::LinkRemove { .. }
+            | PlanCommand::ConnectCreate { .. }
+            | PlanCommand::ConnectRemove { .. }
+    )
+}
+
+pub fn execute_command(graph: &mut PlanGraph, cmd: &PlanCommand) -> Result<String, PlanError> {    match cmd {
         PlanCommand::PlanCreate { path } => {
             let new_graph = PlanGraph::new();
             new_graph.save(path)?;
@@ -285,5 +300,46 @@ mod tests {
         let result = execute_command(&mut g, &cmd).unwrap();
         assert!(result.contains("MyNode"));
         assert!(result.contains("id: 1"));
+    }
+
+    #[test]
+    fn is_mutation_classifies_commands() {
+        use std::path::PathBuf;
+        // Reads never persist.
+        assert!(!is_mutation(&PlanCommand::NodeList));
+        assert!(!is_mutation(&PlanCommand::NodeShow { id: 1 }));
+        // File commands manage their own files.
+        assert!(!is_mutation(&PlanCommand::PlanCreate {
+            path: PathBuf::from("x")
+        }));
+        assert!(!is_mutation(&PlanCommand::PlanOpen {
+            path: PathBuf::from("x")
+        }));
+        // Every graph mutation persists.
+        assert!(is_mutation(&PlanCommand::NodeCreate {
+            title: "t".to_string(),
+            parent_id: None
+        }));
+        assert!(is_mutation(&PlanCommand::NodeUpdate {
+            id: 1,
+            new_title: "t".to_string()
+        }));
+        assert!(is_mutation(&PlanCommand::NodeDelete { id: 1 }));
+        assert!(is_mutation(&PlanCommand::LinkCreate {
+            parent_id: 1,
+            child_id: 2
+        }));
+        assert!(is_mutation(&PlanCommand::LinkRemove {
+            parent_id: 1,
+            child_id: 2
+        }));
+        assert!(is_mutation(&PlanCommand::ConnectCreate {
+            from_id: 1,
+            to_id: 2
+        }));
+        assert!(is_mutation(&PlanCommand::ConnectRemove {
+            from_id: 1,
+            to_id: 2
+        }));
     }
 }
