@@ -16,5 +16,17 @@ pub fn handle(app: &mut crate::app::App, code: KeyCode, mods: KeyModifiers) -> R
     match app.mode {
         Mode::Picker => picker::handle_picker(app, code, mods),
         Mode::Viewer => viewer::handle_viewer(app, code, mods),
+        Mode::Plan => {
+            if let Some(pm) = &mut app.plan {
+                match code {
+                    KeyCode::Up => pm.up(),
+                    KeyCode::Down => pm.down(),
+                    KeyCode::PageUp => pm.page_up(),
+                    KeyCode::PageDown => pm.page_down(),
+                    _ => {}
+                }
+            }
+            Ok(false)
+        }
     }
 }

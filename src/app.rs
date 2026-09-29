@@ -7,6 +7,8 @@ use ratatui::text::Span;
 pub enum Mode {
     Picker,
     Viewer,
+    #[allow(dead_code)] // Constructed in Task 5 (CLI) and Task 6 (picker)
+    Plan,
 }
 
 /// Memory-only annotation on a text span (Task 3 fills, Task 4 lists).
@@ -83,6 +85,8 @@ pub struct App {
     /// Sidebar visibility (Task 4 renders).
     #[allow(dead_code)]
     pub show_sidebar: bool,
+    /// Plan mode state (Task 4).
+    pub plan: Option<crate::plan::PlanMode>,
 }
 
 impl App {
@@ -422,6 +426,7 @@ impl App {
             commenting: None,
             comments: Vec::new(),
             show_sidebar: false,
+            plan: None,
         }
     }
     pub fn load_file(path: &Path, from_picker: bool) -> Result<Self> {
@@ -462,6 +467,7 @@ impl App {
             commenting: None,
             comments: Vec::new(),
             show_sidebar: false,
+            plan: None,
         })
     }
 }
@@ -500,6 +506,7 @@ mod tests {
             commenting: None,
             comments: Vec::new(),
             show_sidebar: false,
+            plan: None,
         }
     }
     #[test]
