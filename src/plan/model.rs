@@ -26,6 +26,7 @@ pub enum PlanError {
     NodeNotFound(u64),
     DuplicateLink,
     InvalidParent(u64),
+    HierarchyCycle { parent: u64, child: u64 },
     // Constructed by MCP arg parsing (staged module); allow until transport lands.
     #[allow(dead_code)]
     InvalidArgs(String),
@@ -38,6 +39,9 @@ impl std::fmt::Display for PlanError {
         match self {
             PlanError::NodeNotFound(id) => write!(f, "Node {} not found", id),
             PlanError::DuplicateLink => write!(f, "Link already exists"),
+            PlanError::HierarchyCycle { parent, child } => {
+                write!(f, "Link {parent} -> {child} would create a hierarchy cycle")
+            }
             PlanError::InvalidParent(id) => write!(f, "Parent node {} not found", id),
             PlanError::InvalidArgs(msg) => write!(f, "Invalid arguments: {}", msg),
             PlanError::Io(e) => write!(f, "IO error: {}", e),
@@ -87,13 +91,15 @@ impl PlanGraph {
         if !self.nodes.iter().any(|n| n.id == id) {
             return Err(PlanError::NodeNotFound(id));
         }
-        // Collect all descendants recursively
+        // Collect all descendants recursively. The visited check keeps this
+        // terminating even on hand-edited cyclic data (the API itself
+        // rejects cycles in `link_create`).
         let mut to_delete = vec![id];
         let mut i = 0;
         while i < to_delete.len() {
             let current = to_delete[i];
             for node in &self.nodes {
-                if node.parent == Some(current) {
+                if node.parent == Some(current) && !to_delete.contains(&node.id) {
                     to_delete.push(node.id);
                 }
             }
@@ -126,6 +132,18 @@ impl PlanGraph {
         }
         if self.nodes.iter().any(|n| n.id == child_id && n.parent == Some(parent_id)) {
             return Err(PlanError::DuplicateLink);
+        }
+        // Reject links that would create a hierarchy cycle: the child must
+        // not appear in the parent's ancestor chain (covers self-links).
+        let mut cursor = Some(parent_id);
+        while let Some(cur) = cursor {
+            if cur == child_id {
+                return Err(PlanError::HierarchyCycle {
+                    parent: parent_id,
+                    child: child_id,
+                });
+            }
+            cursor = self.nodes.iter().find(|n| n.id == cur).and_then(|n| n.parent);
         }
         let child = self
             .nodes
@@ -266,6 +284,27 @@ mod tests {
         g.link_create(parent, child).unwrap();
         g.link_remove(parent, child).unwrap();
         assert_eq!(g.nodes[1].parent, None);
+    }
+
+    #[test]
+    fn link_create_self_link_errors() {
+        let mut g = PlanGraph::new();
+        let a = g.create_node("A", None).unwrap();
+        let result = g.link_create(a, a);
+        assert!(matches!(result, Err(PlanError::HierarchyCycle { .. })));
+    }
+
+    #[test]
+    fn link_create_ancestor_cycle_errors() {
+        let mut g = PlanGraph::new();
+        let a = g.create_node("A", None).unwrap();
+        let b = g.create_node("B", None).unwrap();
+        g.link_create(a, b).unwrap();
+        // B -> A would close a cycle (B's ancestor chain contains A).
+        let result = g.link_create(b, a);
+        assert!(matches!(result, Err(PlanError::HierarchyCycle { .. })));
+        // Graph unchanged.
+        assert_eq!(g.show_node(a).unwrap().parent, None);
     }
 
     #[test]

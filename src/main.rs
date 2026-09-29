@@ -64,7 +64,13 @@ fn handle_plan_command(
         .join("plan.json");
     let path = plan_file.unwrap_or(&default_path);
 
-    let mut graph = PlanGraph::load(path).unwrap_or_else(|_| PlanGraph::new());
+    let mut graph = match PlanGraph::load(path) {
+        Ok(g) => g,
+        // Missing file means a fresh plan; an unreadable *existing* file is
+        // an error — silently starting over would overwrite user data.
+        Err(_) if !path.exists() => PlanGraph::new(),
+        Err(e) => return Err(e.into()),
+    };
 
     let cmd = match subcmd {
         PlanSubcommand::Plan => {
@@ -133,5 +139,47 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
                 crate::plan::render_plan(f, &pm.graph, area);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn corrupt_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("ctx_corrupt_{tag}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn corrupt_plan_file_errors_instead_of_overwriting() {
+        let dir = corrupt_dir("err");
+        let path = dir.join("plan.json");
+        std::fs::write(&path, "corrupt!!!").unwrap();
+        let cmd = cli::PlanSubcommand::NodeCreate {
+            title: "X".to_string(),
+            parent_id: None,
+        };
+        let result = handle_plan_command(&cmd, Some(&path));
+        assert!(result.is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "corrupt!!!");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn missing_plan_file_starts_fresh_and_saves() {
+        let dir = corrupt_dir("fresh");
+        let path = dir.join("plan.json");
+        let cmd = cli::PlanSubcommand::NodeCreate {
+            title: "Fresh".to_string(),
+            parent_id: None,
+        };
+        handle_plan_command(&cmd, Some(&path)).unwrap();
+        let loaded = crate::plan::model::PlanGraph::load(&path).unwrap();
+        assert_eq!(loaded.nodes.len(), 1);
+        assert_eq!(loaded.nodes[0].title, "Fresh");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
