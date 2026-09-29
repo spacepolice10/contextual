@@ -3,6 +3,7 @@ mod cli;
 mod highlight;
 mod input;
 mod picker;
+mod plan;
 mod search;
 mod select;
 mod tui;
