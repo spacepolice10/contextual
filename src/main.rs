@@ -18,6 +18,12 @@ use std::{io, time::Duration};
 
 fn main() -> Result<()> {
     let cli = cli::Cli::parse();
+
+    // Handle plan subcommands before entering TUI
+    if let Some(subcmd) = &cli.plan {
+        return handle_plan_command(subcmd, cli.plan_file.as_deref());
+    }
+
     let mut app = match cli.path {
         Some(p) => app::App::load_file(&p, false)?,
         None => {
@@ -41,6 +47,74 @@ fn main() -> Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+fn handle_plan_command(
+    subcmd: &cli::PlanSubcommand,
+    plan_file: Option<&std::path::Path>,
+) -> Result<()> {
+    use crate::plan::commands::{execute_command, PlanCommand};
+    use crate::plan::model::PlanGraph;
+    use cli::PlanSubcommand;
+
+    let default_path = dirs::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("contextual")
+        .join("plan.json");
+    let path = plan_file.unwrap_or(&default_path);
+
+    let mut graph = PlanGraph::load(path).unwrap_or_else(|_| PlanGraph::new());
+
+    let cmd = match subcmd {
+        PlanSubcommand::Plan => {
+            // Open plan mode in TUI — handled by caller
+            return Ok(());
+        }
+        PlanSubcommand::PlanCreate { path } => {
+            let new_graph = PlanGraph::new();
+            new_graph.save(path)?;
+            println!("Created new plan: {}", path.display());
+            return Ok(());
+        }
+        PlanSubcommand::PlanOpen { path } => {
+            let loaded = PlanGraph::load(path)?;
+            println!("Opened plan: {}", path.display());
+            println!("Nodes: {}", loaded.nodes.len());
+            return Ok(());
+        }
+        PlanSubcommand::NodeCreate { title, parent_id } => PlanCommand::NodeCreate {
+            title: title.clone(),
+            parent_id: *parent_id,
+        },
+        PlanSubcommand::NodeUpdate { id, new_title } => PlanCommand::NodeUpdate {
+            id: *id,
+            new_title: new_title.clone(),
+        },
+        PlanSubcommand::NodeDelete { id } => PlanCommand::NodeDelete { id: *id },
+        PlanSubcommand::NodeList => PlanCommand::NodeList,
+        PlanSubcommand::NodeShow { id } => PlanCommand::NodeShow { id: *id },
+        PlanSubcommand::LinkCreate { parent_id, child_id } => PlanCommand::LinkCreate {
+            parent_id: *parent_id,
+            child_id: *child_id,
+        },
+        PlanSubcommand::LinkRemove { parent_id, child_id } => PlanCommand::LinkRemove {
+            parent_id: *parent_id,
+            child_id: *child_id,
+        },
+        PlanSubcommand::ConnectCreate { from_id, to_id } => PlanCommand::ConnectCreate {
+            from_id: *from_id,
+            to_id: *to_id,
+        },
+        PlanSubcommand::ConnectRemove { from_id, to_id } => PlanCommand::ConnectRemove {
+            from_id: *from_id,
+            to_id: *to_id,
+        },
+    };
+
+    let result = execute_command(&mut graph, &cmd)?;
+    println!("{}", result);
+    graph.save(path)?;
     Ok(())
 }
 

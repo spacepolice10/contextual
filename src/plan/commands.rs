@@ -3,7 +3,11 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub enum PlanCommand {
+    // Constructed via parse_command by MCP integration (Task 7);
+    // CLI (Task 5) handles file commands directly.
+    #[allow(dead_code)]
     PlanCreate { path: PathBuf },
+    #[allow(dead_code)]
     PlanOpen { path: PathBuf },
     NodeCreate { title: String, parent_id: Option<u64> },
     NodeUpdate { id: u64, new_title: String },
@@ -16,6 +20,7 @@ pub enum PlanCommand {
     ConnectRemove { from_id: u64, to_id: u64 },
 }
 
+#[allow(dead_code)] // Entry point for MCP integration (Task 7)
 pub fn parse_command(input: &str) -> Result<PlanCommand, String> {
     let parts: Vec<&str> = input.split_whitespace().collect();
     if parts.is_empty() {

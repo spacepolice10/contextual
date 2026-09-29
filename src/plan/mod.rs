@@ -18,6 +18,7 @@ pub struct PlanMode {
 }
 
 impl PlanMode {
+    #[allow(dead_code)] // Constructed by picker integration (Task 6)
     pub fn new(graph: PlanGraph, file_path: PathBuf) -> Self {
         PlanMode {
             graph,
