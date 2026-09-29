@@ -74,10 +74,23 @@ fn render_flow_node<'a>(
     } else {
         "├─ "
     };
-    let cross_marker = if graph.cross_links.iter().any(|l| l.from == node.id) {
-        " ⇢"
+    let cross_targets: Vec<String> = graph
+        .cross_links
+        .iter()
+        .filter(|l| l.from == node.id)
+        .map(|l| {
+            graph
+                .nodes
+                .iter()
+                .find(|n| n.id == l.to)
+                .map(|n| n.title.clone())
+                .unwrap_or_else(|| format!("node {}", l.to))
+        })
+        .collect();
+    let cross_marker = if cross_targets.is_empty() {
+        String::new()
     } else {
-        ""
+        format!(" ⇢ {}", cross_targets.join(", "))
     };
     lines.push(Line::from(format!(
         "{}{}{}{}",
@@ -175,6 +188,20 @@ mod tests {
         assert!(text.iter().any(|l| l == "Root"), "lines: {text:?}");
         assert!(text.iter().any(|l| l == "├─ Child A"), "lines: {text:?}");
         assert!(text.iter().any(|l| l == "└─ Child B"), "lines: {text:?}");
+    }
+
+    #[test]
+    fn render_flow_chart_marks_cross_link_target() {
+        let mut g = PlanGraph::new();
+        let a = g.create_node("Alpha", None).unwrap();
+        let b = g.create_node("Beta", None).unwrap();
+        g.connect_create(a, b).unwrap();
+        let lines = render_flow_chart(&g, Rect::new(0, 0, 80, 24));
+        let text: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+        assert!(
+            text.iter().any(|l| l == "Alpha ⇢ Beta"),
+            "lines: {text:?}"
+        );
     }
 
     #[test]
