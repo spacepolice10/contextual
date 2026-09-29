@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod mcp;
 pub mod model;
 pub mod render;
 

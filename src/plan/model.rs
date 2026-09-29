@@ -26,6 +26,9 @@ pub enum PlanError {
     NodeNotFound(u64),
     DuplicateLink,
     InvalidParent(u64),
+    // Constructed by MCP arg parsing (staged module); allow until transport lands.
+    #[allow(dead_code)]
+    InvalidArgs(String),
     Io(std::io::Error),
     Json(serde_json::Error),
 }
@@ -36,6 +39,7 @@ impl std::fmt::Display for PlanError {
             PlanError::NodeNotFound(id) => write!(f, "Node {} not found", id),
             PlanError::DuplicateLink => write!(f, "Link already exists"),
             PlanError::InvalidParent(id) => write!(f, "Parent node {} not found", id),
+            PlanError::InvalidArgs(msg) => write!(f, "Invalid arguments: {}", msg),
             PlanError::Io(e) => write!(f, "IO error: {}", e),
             PlanError::Json(e) => write!(f, "JSON error: {}", e),
         }
