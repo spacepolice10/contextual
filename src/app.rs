@@ -332,6 +332,8 @@ impl App {
         self.saved_scroll = None;
     }
     /// Open the selected picker entry, replacing viewer state.
+    /// Plan files (`.plan.json` or JSON with a `"nodes"` key) open in
+    /// Plan mode; everything else opens in the Viewer.
     /// Never quits (`Ok(false)`); empty selection is a noop.
     pub fn open_selected_entry(&mut self) -> Result<bool> {
         let hit = self
@@ -341,6 +343,12 @@ impl App {
             .map(|m| m.entry_idx);
         match hit.and_then(|i| self.files.get(i).cloned()) {
             Some(f) => {
+                if crate::picker::is_plan_file(&f.path) {
+                    let graph = crate::plan::model::PlanGraph::load(&f.path)?;
+                    self.plan = Some(crate::plan::PlanMode::new(graph, f.path.clone()));
+                    self.mode = Mode::Plan;
+                    return Ok(false);
+                }
                 *self = Self::load_file(&f.path, true)?;
                 Ok(false)
             }

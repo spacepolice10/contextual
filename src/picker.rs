@@ -147,6 +147,27 @@ pub fn picker_preview_visible(width: usize) -> bool {
 /// Max preview bytes (alongside the `max_lines` cap at call sites).
 pub const PREVIEW_MAX_BYTES: usize = 100 * 1024;
 
+/// True when `path` looks like a plan file: either a `.plan.json`
+/// filename or a `.json` file whose top level has a `"nodes"` key.
+/// Used by the picker to open plan files in Plan mode.
+pub fn is_plan_file(path: &Path) -> bool {
+    // Check .plan.json extension
+    if path.extension().and_then(|e| e.to_str()) == Some("json") {
+        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+            if stem.ends_with(".plan") {
+                return true;
+            }
+        }
+        // Check JSON structure for "nodes" key
+        if let Ok(content) = std::fs::read_to_string(path) {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                return json.get("nodes").is_some();
+            }
+        }
+    }
+    false
+}
+
 /// Capped lossy preview read: at most `PREVIEW_MAX_BYTES` off disk, then
 /// `max_lines` lines. Returns lines plus a `[binary preview]` note when NUL
 /// bytes are present. Never fails: unreadable files yield empty lines.
@@ -362,6 +383,34 @@ mod tests {
         assert!(picker_preview_visible(80));
         assert!(!picker_preview_visible(0));
     }
+    #[test]
+    fn plan_file_detected_by_extension() {
+        let entry = entry("myplan.plan.json");
+        assert!(is_plan_file(&entry.path));
+    }
+
+    #[test]
+    fn non_plan_file_not_detected() {
+        let entry = entry("README.md");
+        assert!(!is_plan_file(&entry.path));
+    }
+
+    #[test]
+    fn plan_file_with_plan_structure_detected() {
+        // A .json file with "nodes" array is a plan file
+        let dir = unique_dir("plandet");
+        let path = dir.join("custom.json");
+        let json = r#"{"nodes":[{"id":1,"title":"Root","parent":null}],"cross_links":[]}"#;
+        std::fs::write(&path, json).unwrap();
+        let entry = FileEntry {
+            name: "custom.json".to_string(),
+            path: path.clone(),
+            size: 0,
+        };
+        assert!(is_plan_file(&entry.path));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn truncated_flag_reaches_prompt() {
         let a = crate::app::App::new_picker(
