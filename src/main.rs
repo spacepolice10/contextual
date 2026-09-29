@@ -135,8 +135,8 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
         Mode::Picker => crate::ui::picker::render_picker(f, app, area),
         Mode::Viewer => crate::ui::viewer::render_viewer(f, app, area),
         Mode::Plan => {
-            if let Some(pm) = &app.plan {
-                crate::plan::render_plan(f, &pm.graph, area);
+            if let Some(pm) = &mut app.plan {
+                crate::plan::render_plan(f, pm, area);
             }
         }
     }

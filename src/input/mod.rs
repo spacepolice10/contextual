@@ -19,8 +19,10 @@ pub fn handle(app: &mut crate::app::App, code: KeyCode, mods: KeyModifiers) -> R
         Mode::Plan => {
             if let Some(pm) = &mut app.plan {
                 match code {
-                    KeyCode::Up => pm.up(),
-                    KeyCode::Down => pm.down(),
+                    KeyCode::Up | KeyCode::Char('k') => pm.up(),
+                    KeyCode::Down | KeyCode::Char('j') => pm.down(),
+                    KeyCode::Left | KeyCode::Char('h') => pm.parent(),
+                    KeyCode::Right | KeyCode::Char('l') => pm.child(),
                     KeyCode::PageUp => pm.page_up(),
                     KeyCode::PageDown => pm.page_down(),
                     _ => {}
