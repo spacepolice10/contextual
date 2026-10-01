@@ -8,6 +8,29 @@ pub(super) fn handle_viewer(
     code: KeyCode,
     mods: KeyModifiers,
 ) -> Result<bool> {
+            // Theme picker overlay: navigate with live preview, Enter
+            // applies, Esc restores the pre-open theme.
+            if app.theme_picker.is_some() {
+                match code {
+                    KeyCode::Esc => {
+                        app.cancel_theme_picker();
+                        return Ok(false);
+                    }
+                    KeyCode::Enter => {
+                        app.apply_theme_picker();
+                        return Ok(false);
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        app.theme_picker_move(1);
+                        return Ok(false);
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        app.theme_picker_move(-1);
+                        return Ok(false);
+                    }
+                    _ => return Ok(false),
+                }
+            }
             // Comment draft input: keystrokes edit `draft`, Enter saves to
             // the memory buffer, Esc drops back to visual (selection kept).
             if app.commenting.is_some() {
@@ -152,8 +175,14 @@ pub(super) fn handle_viewer(
                         return Ok(false);
                     }
                     if app.from_picker && code == KeyCode::Esc {
-                        let (files, truncated) = crate::picker::discover_files(std::path::Path::new("."));
+                        let theme = app.theme;
+                        let comments = std::mem::take(&mut app.comments);
+                        let show_sidebar = app.show_sidebar;
+                        let (files, truncated) = crate::file_picker::discover_files(std::path::Path::new("."));
                         *app = crate::app::App::new_picker(files, truncated);
+                        app.theme = theme;
+                        app.comments = comments;
+                        app.show_sidebar = show_sidebar;
                         Ok(false)
                     } else {
                         Ok(true)
@@ -474,6 +503,14 @@ pub(super) fn handle_viewer(
                     app.show_sidebar = !app.show_sidebar;
                     Ok(false)
                 }
+                KeyCode::Char('T')
+                    if !mods.contains(KeyModifiers::CONTROL)
+                        && !mods.contains(KeyModifiers::ALT) =>
+                {
+                    app.pending_count = None;
+                    app.open_theme_picker();
+                    Ok(false)
+                }
                 _ => {
                     app.pending_count = None;
                     Ok(false)
@@ -498,7 +535,7 @@ mod tests {
         assert_eq!(a.mode, crate::app::Mode::Picker);
         assert!(!a.files.is_empty());
         assert!(
-            a.files.iter().any(|f| crate::picker::display_path(f)
+            a.files.iter().any(|f| crate::file_picker::display_path(f)
                 .chars()
                 .filter(|&c| c == '/')
                 .count()
@@ -506,6 +543,21 @@ mod tests {
             "expected recursive entries"
         );
         assert_eq!(a.picker.filtered.len(), a.files.len());
+    }
+    #[test]
+    fn esc_back_to_picker_keeps_live_theme() {
+        use crate::highlight::Theme;
+        let _cfg = crate::config::isolated_test_config("picker-live-theme");
+        crate::config::save_theme(Theme::Dark);
+        let mut a = viewer();
+        assert_eq!(a.theme, Theme::Dark);
+        // Unsaved live theme change (Shift+T preview without Enter).
+        a.theme = Theme::Nord;
+        a.from_picker = true;
+        let quit = handle(&mut a, KeyCode::Esc, KeyModifiers::NONE).unwrap();
+        assert!(!quit);
+        assert_eq!(a.mode, crate::app::Mode::Picker);
+        assert_eq!(a.theme, Theme::Nord);
     }
     #[test]
     fn slash_enters_search_and_esc_restores() {
@@ -819,5 +871,35 @@ mod tests {
         a.lines = vec!["hi".to_string()];
         handle(&mut a, KeyCode::Char('v'), KeyModifiers::NONE).unwrap();
         assert!(viewer_hint(false).contains("C"));
+    }
+    #[test]
+    fn shift_t_opens_theme_picker_and_esc_cancels() {
+        let mut a = viewer();
+        assert!(a.theme_picker.is_none());
+        handle(&mut a, KeyCode::Char('T'), KeyModifiers::SHIFT).unwrap();
+        assert!(a.theme_picker.is_some());
+        let theme = a.theme;
+        handle(&mut a, KeyCode::Char('j'), KeyModifiers::NONE).unwrap();
+        assert_ne!(a.theme, theme);
+        let quit = handle(&mut a, KeyCode::Esc, KeyModifiers::NONE).unwrap();
+        assert!(!quit);
+        assert!(a.theme_picker.is_none());
+        assert_eq!(a.theme, theme);
+    }
+    #[test]
+    fn theme_picker_enter_applies_and_keeps_theme() {
+        // Isolated: `Enter` persists to disk, must not touch real config
+        // nor race other tests' config files.
+        let _cfg = crate::config::isolated_test_config("viewer-apply");
+        let mut a = viewer();
+        handle(&mut a, KeyCode::Char('T'), KeyModifiers::SHIFT).unwrap();
+        let theme = a.theme;
+        handle(&mut a, KeyCode::Down, KeyModifiers::NONE).unwrap();
+        assert_ne!(a.theme, theme);
+        let kept = a.theme;
+        let quit = handle(&mut a, KeyCode::Enter, KeyModifiers::NONE).unwrap();
+        assert!(!quit);
+        assert!(a.theme_picker.is_none());
+        assert_eq!(a.theme, kept);
     }
 }

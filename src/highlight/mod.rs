@@ -23,6 +23,86 @@ pub enum Lang {
 pub enum Theme {
     Dark,
     Light,
+    Catppuccin,
+    Nord,
+    Dracula,
+    Gruvbox,
+    TokyoNight,
+    Monokai,
+    SolarizedDark,
+    SolarizedLight,
+    GithubDark,
+    RosePine,
+    AyuDark,
+    Everforest,
+    Synthwave,
+}
+
+impl Theme {
+    /// All builtin themes in picker order.
+    pub fn all() -> &'static [Theme] {
+        &[
+            Theme::Dark,
+            Theme::Light,
+            Theme::Catppuccin,
+            Theme::Nord,
+            Theme::Dracula,
+            Theme::Gruvbox,
+            Theme::TokyoNight,
+            Theme::Monokai,
+            Theme::SolarizedDark,
+            Theme::SolarizedLight,
+            Theme::GithubDark,
+            Theme::RosePine,
+            Theme::AyuDark,
+            Theme::Everforest,
+            Theme::Synthwave,
+        ]
+    }
+
+    /// Stable lowercase id for the picker list.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Theme::Dark => "one-dark",
+            Theme::Light => "one-light",
+            Theme::Catppuccin => "catppuccin",
+            Theme::Nord => "nord",
+            Theme::Dracula => "dracula",
+            Theme::Gruvbox => "gruvbox",
+            Theme::TokyoNight => "tokyo-night",
+            Theme::Monokai => "monokai",
+            Theme::SolarizedDark => "solarized-dark",
+            Theme::SolarizedLight => "solarized-light",
+            Theme::GithubDark => "github-dark",
+            Theme::RosePine => "rose-pine",
+            Theme::AyuDark => "ayu-dark",
+            Theme::Everforest => "everforest",
+            Theme::Synthwave => "synthwave",
+        }
+    }
+
+    /// Parse a stored theme id; surrounding whitespace tolerated.
+    /// Unknown input -> None (caller falls back to auto-detect).
+    pub fn from_name(s: &str) -> Option<Theme> {
+        match s.trim() {
+            "one-dark" => Some(Theme::Dark),
+            "one-light" => Some(Theme::Light),
+            "catppuccin" => Some(Theme::Catppuccin),
+            "nord" => Some(Theme::Nord),
+            "dracula" => Some(Theme::Dracula),
+            "gruvbox" => Some(Theme::Gruvbox),
+            "tokyo-night" => Some(Theme::TokyoNight),
+            "monokai" => Some(Theme::Monokai),
+            "solarized-dark" => Some(Theme::SolarizedDark),
+            "solarized-light" => Some(Theme::SolarizedLight),
+            "github-dark" => Some(Theme::GithubDark),
+            "rose-pine" => Some(Theme::RosePine),
+            "ayu-dark" => Some(Theme::AyuDark),
+            "everforest" => Some(Theme::Everforest),
+            "synthwave" => Some(Theme::Synthwave),
+            _ => None,
+        }
+    }
 }
 
 use ratatui::text::Span;
@@ -185,6 +265,15 @@ mod tests {
         assert_eq!(detect(Path::new("Rakefile")), Some(Lang::Ruby));
         assert_eq!(detect(Path::new("notes.txt")), None);
         assert_eq!(detect(Path::new("Makefile")), None);
+    }
+    #[test]
+    fn theme_name_round_trips_all_builtins() {
+        for theme in Theme::all() {
+            assert_eq!(Theme::from_name(theme.name()), Some(*theme));
+        }
+        assert_eq!(Theme::from_name("  dracula\n"), Some(Theme::Dracula));
+        assert_eq!(Theme::from_name("nope"), None);
+        assert_eq!(Theme::from_name(""), None);
     }
     #[test]
     fn highlight_rust_keywords() {

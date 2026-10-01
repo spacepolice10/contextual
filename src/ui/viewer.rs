@@ -1,6 +1,6 @@
 use crate::ui::paint::{paint_search_ranges, paint_selection_ranges};
 use crate::ui::sidebar::sidebar_lines;
-use crate::ui::status::{comment_prompt, comments_tag, status_line, viewer_hint, visual_tag};
+use crate::ui::status::{comments_tag, status_line, viewer_hint, visual_tag};
 use crate::{highlight, viewer};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -19,6 +19,49 @@ pub fn gutter_number(lidx: usize, cursor_line: usize) -> usize {
     } else {
         lidx.abs_diff(cursor_line)
     }
+}
+
+/// Display row where the inline comment editor starts: right after the
+/// last display row of `end_line`. Falls back to the very end when the
+/// line is missing (never panics, never hides the editor).
+pub fn editor_insert_row(display: &[(usize, String)], end_line: usize) -> usize {
+    display
+        .iter()
+        .rposition(|(l, _)| *l == end_line)
+        .map(|i| i + 1)
+        .unwrap_or(display.len())
+}
+
+/// Inline comment editor rows: the single-line draft wrapped
+/// (char-based) to `width`, gutter-aligned, with the block cursor cell
+/// at the text end. A full last row pushes the cursor onto its own row
+/// so it is never truncated. Text is never dropped.
+pub fn comment_editor_rows(
+    draft: &str,
+    width: usize,
+    gutter: usize,
+) -> Vec<Line<'static>> {
+    let w = width.max(1);
+    let pad = " ".repeat(gutter);
+    let cursor = Style::default().bg(Color::DarkGray).fg(Color::White);
+    let chunks = crate::ui::sidebar::wrap_text(draft, w);
+    let mut rows: Vec<Line<'static>> = chunks
+        .iter()
+        .map(|c| Line::from(Span::raw(format!("{pad}{c}"))))
+        .collect();
+    let full = chunks
+        .last()
+        .map(|c| c.chars().count() >= w)
+        .unwrap_or(false);
+    if full {
+        rows.push(Line::from(vec![
+            Span::raw(pad),
+            Span::styled("▌", cursor),
+        ]));
+    } else if let Some(last) = rows.last_mut() {
+        last.spans.push(Span::styled("▌", cursor));
+    }
+    rows
 }
 
 /// Viewer screen: text panel + optional comments sidebar + 2-row status bar.
@@ -89,6 +132,19 @@ pub fn render_viewer(f: &mut Frame, app: &mut crate::app::App, area: Rect) {
                     app.h_scroll = app.cursor_col + 1 - tw;
                 }
                 app.h_scroll = viewer::clamp_hscroll(app.h_scroll, max_width, tw);
+            }
+            // Inline comment editor: virtual rows spliced into the text
+            // below the selection end line. Scroll first so the editor
+            // fits the viewport (tail wins when it overflows it).
+            let editor = app.commenting.as_ref().map(|p| {
+                let rows = comment_editor_rows(&p.draft, text_w.max(1), gutter);
+                let at = editor_insert_row(&display, p.end.0);
+                (rows, at)
+            });
+            if let Some((rows, at)) = &editor {
+                let e = rows.len().max(1).min(vh.max(1));
+                app.scroll = at.saturating_sub(vh.saturating_sub(e));
+                app.scroll = viewer::clamp_scroll(app.scroll, total, vh);
             }
             let end = (app.scroll + vh).min(total);
             let cursor_style = Style::default().bg(Color::DarkGray).fg(Color::White);
@@ -240,6 +296,16 @@ pub fn render_viewer(f: &mut Frame, app: &mut crate::app::App, area: Rect) {
                 spans.extend(body_span);
                 text.push(Line::from(spans));
             }
+            // Splice the inline editor below the selection end line; the
+            // tail wins when it overflows the viewport (cursor stays seen).
+            if let Some((rows, at)) = editor {
+                let pos = at.saturating_sub(app.scroll).min(text.len());
+                let room = vh.saturating_sub(pos);
+                let take = room.min(rows.len());
+                let skip = rows.len() - take;
+                text.splice(pos..pos, rows.into_iter().skip(skip).take(take));
+                text.truncate(vh);
+            }
             let body = Paragraph::new(text).block(
                 Block::default()
                     .borders(Borders::ALL)
@@ -303,32 +369,18 @@ pub fn render_viewer(f: &mut Frame, app: &mut crate::app::App, area: Rect) {
                 s.push_str(&comments_tag(app.comments.len()));
             }
             let bar_w = chunks[1].width as usize;
-            // While typing a note, row 1 is the input
-            // (`Comment on <file:line>: <draft>▌`) and row 2 the confirm
-            // hint; otherwise row 1 is the status line.
-            let rows = if let Some(p) = &app.commenting {
-                let mut first = vec![Span::raw(comment_prompt(
-                    &app.filename,
-                    p.start.0 + 1,
-                    &p.draft,
-                ))];
-                first.push(Span::styled(
-                    "▌",
-                    Style::default().bg(Color::DarkGray).fg(Color::White),
-                ));
-                vec![
-                    Line::from(first),
-                    Line::from(Span::styled(
-                        "Enter save · Esc cancel",
-                        Style::default().fg(Color::DarkGray),
-                    )),
-                ]
+            // While typing a note the draft lives inline below the
+            // selection; row 1 stays the normal status line and row 2
+            // keeps the confirm hint.
+            let hint = if app.commenting.is_some() {
+                Line::from(Span::styled(
+                    "Enter save · Esc cancel",
+                    Style::default().fg(Color::DarkGray),
+                ))
             } else {
-                vec![
-                    status_line(bar_w, &s, viewer_hint(app.searching)),
-                    Line::from(Span::raw("")),
-                ]
+                Line::from(Span::raw(""))
             };
+            let rows = vec![status_line(bar_w, &s, viewer_hint(app.searching)), hint];
             let bar = Paragraph::new(rows);
             f.render_widget(bar, chunks[1]);
 }
@@ -351,6 +403,86 @@ mod tests {
         // Cursor on first line.
         assert_eq!(gutter_number(0, 0), 1);
         assert_eq!(gutter_number(2, 0), 2);
+    }
+    #[test]
+    fn comment_editor_rows_wrap_and_mark_cursor() {
+        // Width 4, gutter 2: draft wraps into aligned rows, ▌ ends the text.
+        let rows = comment_editor_rows("abcdef", 4, 2);
+        let text: Vec<String> = rows
+            .iter()
+            .map(|l| l.spans.iter().map(|s| s.content.to_string()).collect())
+            .collect();
+        assert_eq!(text, vec!["  abcd".to_string(), "  ef▌".to_string()]);
+        // Full last row pushes the cursor onto its own row (never truncated).
+        let rows = comment_editor_rows("abcdefgh", 4, 2);
+        let text: Vec<String> = rows
+            .iter()
+            .map(|l| l.spans.iter().map(|s| s.content.to_string()).collect())
+            .collect();
+        assert_eq!(text, vec!["  abcd".to_string(), "  efgh".to_string(), "  ▌".to_string()]);
+        // Empty draft is still one visible cursor row; text never lost.
+        let rows = comment_editor_rows("", 4, 2);
+        let flat: String = rows
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.to_string()))
+            .collect();
+        assert!(flat.contains('▌'));
+        let long = "x".repeat(100);
+        let rows = comment_editor_rows(&long, 10, 0);
+        let flat: String = rows
+            .iter()
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.to_string())
+                    .collect::<String>()
+            })
+            .collect();
+        assert_eq!(flat.chars().filter(|&c| c == 'x').count(), 100);
+    }
+    #[test]
+    fn editor_insert_row_follows_selection_end() {
+        let display = vec![
+            (0, "a".to_string()),
+            (1, "b".to_string()),
+            (1, "c".to_string()),
+            (2, "d".to_string()),
+        ];
+        assert_eq!(editor_insert_row(&display, 1), 3);
+        assert_eq!(editor_insert_row(&display, 0), 1);
+        assert_eq!(editor_insert_row(&display, 9), display.len());
+    }
+    #[test]
+    fn comment_editor_renders_inline_below_selection() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let mut a = viewer();
+        a.lines = vec!["aa".to_string(), "bb".to_string(), "cc".to_string()];
+        a.lang = None;
+        a.highlighted = None;
+        a.cursor_line = 0;
+        a.cursor_col = 1;
+        a.visual = Some(crate::select::Selection {
+            anchor: (0, 0),
+            kind: crate::select::SelectKind::Char,
+        });
+        // Select (0,0)-(0,1), open the draft with a distinctive note.
+        crate::input::handle(&mut a, KeyCode::Char('e'), KeyModifiers::NONE).unwrap();
+        crate::input::handle(&mut a, KeyCode::Enter, KeyModifiers::NONE).unwrap();
+        assert!(a.commenting.is_some());
+        for c in "zz-note".chars() {
+            crate::input::handle(&mut a, KeyCode::Char(c), KeyModifiers::NONE).unwrap();
+        }
+        let backend = TestBackend::new(40, 12);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| crate::render(f, &mut a)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let text: String = buf.content().iter().map(|c| c.symbol().to_string()).collect();
+        // Draft lives in the text panel now, not as a status-bar prompt.
+        assert!(text.contains("zz-note"), "no inline editor text");
+        assert!(!text.contains("Comment on"), "prompt still in status bar");
+        // Status row 1 is the normal status line again.
+        assert!(text.contains("Ln 2,Col 2"), "no normal status line");
+        assert!(text.contains("Enter save"), "no save hint");
     }
     #[test]
     fn render_smoke_visual_sidebar_commenting() {
@@ -376,7 +508,7 @@ mod tests {
             snippet: "hello".to_string(),
             start: (0, 0),
             end: (0, 5),
-            draft: "ok".to_string(),
+            draft: "zz-draft-ok".to_string(),
         });
         let backend = TestBackend::new(80, 24);
         let mut term = Terminal::new(backend).unwrap();
@@ -389,9 +521,12 @@ mod tests {
             .map(|c| c.symbol().to_string())
             .collect();
         assert!(text.contains("comments (C)"), "no sidebar title");
-        assert!(text.contains("Comment on"), "no input row");
-        // Input row replaces the status line while commenting; drop back
-        // to visual to check the mode tag + comment count row.
+        // Draft renders inline below the selection now: the note text is
+        // in the text panel, the status bar keeps its normal first row.
+        assert!(text.contains("zz-draft-ok"), "no inline draft");
+        assert!(text.contains("Enter save"), "no save hint");
+        assert!(!text.contains("Comment on"), "prompt still in status bar");
+        // Drop back to visual to check the mode tag + comment count row.
         a.commenting = None;
         term.draw(|f| crate::render(f, &mut a)).unwrap();
         let buf = term.backend().buffer().clone();

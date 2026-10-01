@@ -1,5 +1,5 @@
 use crate::highlight::{self, Lang};
-use crate::picker::{filter_files, FileEntry, ScoredMatch};
+use crate::file_picker::{filter_files, FileEntry, ScoredMatch};
 use crate::select::Selection;
 use ratatui::text::Span;
 
@@ -39,6 +39,14 @@ pub struct PickerState {
     pub selected: usize,
     pub preview_scroll: usize,
     pub truncated: bool,
+}
+
+/// Theme-picker overlay state: index into `Theme::all()` plus the theme
+/// active before opening (restored on `Esc`).
+#[derive(Debug, Clone)]
+pub struct ThemePickerState {
+    pub selected: usize,
+    pub original: highlight::Theme,
 }
 
 #[derive(Debug)]
@@ -83,6 +91,8 @@ pub struct App {
     /// Sidebar visibility (Task 4 renders).
     #[allow(dead_code)]
     pub show_sidebar: bool,
+    /// Theme-picker overlay (Shift+T in viewer); `None` when closed.
+    pub theme_picker: Option<ThemePickerState>,
 }
 
 impl App {
@@ -328,7 +338,8 @@ impl App {
         self.saved_scroll = None;
     }
     /// Open the selected picker entry, replacing viewer state.
-    /// Never quits (`Ok(false)`); empty selection is a noop.
+    /// Session comments (and sidebar visibility) survive the switch;
+    /// never quits (`Ok(false)`); empty selection is a noop.
     pub fn open_selected_entry(&mut self) -> Result<bool> {
         let hit = self
             .picker
@@ -337,7 +348,11 @@ impl App {
             .map(|m| m.entry_idx);
         match hit.and_then(|i| self.files.get(i).cloned()) {
             Some(f) => {
+                let comments = std::mem::take(&mut self.comments);
+                let show_sidebar = self.show_sidebar;
                 *self = Self::load_file(&f.path, true)?;
+                self.comments = comments;
+                self.show_sidebar = show_sidebar;
                 Ok(false)
             }
             None => Ok(false),
@@ -381,6 +396,46 @@ impl App {
             self.cursor_col = c;
         }
     }
+    /// Re-highlight the buffer for the current theme. Noop without a language.
+    fn rehighlight(&mut self) {
+        if let Some(lang) = self.lang {
+            let text = self.lines.join("\n");
+            self.highlighted = highlight::highlight_file(&text, lang, self.theme);
+        }
+    }
+    /// Open the theme picker, selecting the active theme.
+    pub fn open_theme_picker(&mut self) {
+        let selected = highlight::Theme::all()
+            .iter()
+            .position(|t| *t == self.theme)
+            .unwrap_or(0);
+        self.theme_picker = Some(ThemePickerState {
+            selected,
+            original: self.theme,
+        });
+    }
+    /// Move the theme selection, live-previewing the hovered theme.
+    pub fn theme_picker_move(&mut self, delta: isize) {
+        let Some(p) = self.theme_picker.as_mut() else {
+            return;
+        };
+        let len = highlight::Theme::all().len();
+        p.selected = (p.selected as isize + delta).rem_euclid(len as isize) as usize;
+        self.theme = highlight::Theme::all()[p.selected];
+        self.rehighlight();
+    }
+    /// Dismiss the picker, restoring the pre-open theme.
+    pub fn cancel_theme_picker(&mut self) {
+        if let Some(p) = self.theme_picker.take() {
+            self.theme = p.original;
+            self.rehighlight();
+        }
+    }
+    /// Apply the previewed theme and close the picker, persisting the choice.
+    pub fn apply_theme_picker(&mut self) {
+        self.theme_picker = None;
+        crate::config::save_theme(self.theme);
+    }
 }
 
 use anyhow::{Context, Result};
@@ -389,6 +444,7 @@ use std::path::Path;
 impl App {
     pub fn new_picker(files: Vec<FileEntry>, truncated: bool) -> Self {
         let filtered = filter_files(&files, "");
+        let theme = crate::config::load_theme().unwrap_or_else(highlight::detect_theme);
         Self {
             mode: Mode::Picker,
             files,
@@ -415,13 +471,14 @@ impl App {
             saved_scroll: None,
             lang: None,
             highlighted: None,
-            theme: highlight::Theme::Dark,
+            theme,
             visual: None,
             pending_count: None,
             pending_object: None,
             commenting: None,
             comments: Vec::new(),
             show_sidebar: false,
+            theme_picker: None,
         }
     }
     pub fn load_file(path: &Path, from_picker: bool) -> Result<Self> {
@@ -430,7 +487,7 @@ impl App {
         let text = String::from_utf8_lossy(&bytes).to_string();
         let lossy = String::from_utf8(bytes).is_err();
         let lines: Vec<String> = text.lines().map(|s| s.to_string()).collect();
-        let theme = highlight::detect_theme();
+        let theme = crate::config::load_theme().unwrap_or_else(highlight::detect_theme);
         let lang = highlight::detect(path);
         let highlighted = lang.and_then(|l| highlight::highlight_file(&text, l, theme));
         Ok(Self {
@@ -462,6 +519,7 @@ impl App {
             commenting: None,
             comments: Vec::new(),
             show_sidebar: false,
+            theme_picker: None,
         })
     }
 }
@@ -500,6 +558,7 @@ mod tests {
             commenting: None,
             comments: Vec::new(),
             show_sidebar: false,
+            theme_picker: None,
         }
     }
     #[test]
@@ -617,6 +676,51 @@ mod tests {
         assert_eq!(a.mode, Mode::Picker);
     }
     #[test]
+    fn open_selected_entry_keeps_session_comments() {
+        let dir = std::env::temp_dir();
+        let p1 = dir.join("ctx_keep_a.txt");
+        let p2 = dir.join("ctx_keep_b.txt");
+        std::fs::write(&p1, "aaa\n").unwrap();
+        std::fs::write(&p2, "bbb\n").unwrap();
+        let mut a = App::load_file(&p1, true).unwrap();
+        a.comments.push(Comment {
+            id: 0,
+            file: a.filename.clone(),
+            start: (0, 0),
+            end: (0, 1),
+            snippet: "a".to_string(),
+            note: "keep me".to_string(),
+        });
+        a.show_sidebar = true;
+        a.files = vec![
+            crate::file_picker::FileEntry {
+                name: "ctx_keep_a.txt".into(),
+                path: p1.clone(),
+                size: 0,
+            },
+            crate::file_picker::FileEntry {
+                name: "ctx_keep_b.txt".into(),
+                path: p2.clone(),
+                size: 0,
+            },
+        ];
+        a.picker_recompute();
+        a.picker.selected = a
+            .picker
+            .filtered
+            .iter()
+            .position(|m| a.files[m.entry_idx].path == p2)
+            .unwrap();
+        a.open_selected_entry().unwrap();
+        assert_eq!(a.filename, p2.display().to_string());
+        assert_eq!(a.comments.len(), 1);
+        assert_eq!(a.comments[0].note, "keep me");
+        assert!(a.comments[0].file.contains("ctx_keep_a"));
+        assert!(a.show_sidebar);
+        let _ = std::fs::remove_file(&p1);
+        let _ = std::fs::remove_file(&p2);
+    }
+    #[test]
     fn cancel_commenting_keeps_visual() {
         use crate::select::{SelectKind, Selection};
         let mut a = viewer_app(1);
@@ -717,5 +821,68 @@ mod tests {
         a.cursor_col = 0;
         a.move_word_back(false);
         assert_eq!((a.cursor_line, a.cursor_col), (0, 0));
+    }
+    #[test]
+    fn theme_picker_open_move_cancel_and_apply() {
+        use crate::highlight::Theme;
+        // Isolated: `apply` persists to disk, must not touch real config
+        // nor race other tests' config files.
+        let _cfg = crate::config::isolated_test_config("picker-apply");
+        let mut a = viewer_app(3);
+        a.theme = Theme::Dark;
+        a.open_theme_picker();
+        assert!(a.theme_picker.is_some());
+        // Moving previews another theme live.
+        a.theme_picker_move(1);
+        assert_ne!(a.theme, Theme::Dark);
+        let previewed = a.theme;
+        // Cancel restores the original theme.
+        a.cancel_theme_picker();
+        assert!(a.theme_picker.is_none());
+        assert_eq!(a.theme, Theme::Dark);
+        // Reopen, move, apply keeps the previewed theme.
+        a.open_theme_picker();
+        a.theme_picker_move(1);
+        let kept = a.theme;
+        assert_ne!(kept, Theme::Dark);
+        a.apply_theme_picker();
+        assert!(a.theme_picker.is_none());
+        assert_eq!(a.theme, kept);
+        let _ = previewed;
+    }
+    #[test]
+    fn apply_persists_theme_and_cancel_writes_nothing() {
+        use crate::highlight::Theme;
+        let _cfg = crate::config::isolated_test_config("persist");
+        // Cancel leaves no trace.
+        let mut a = viewer_app(3);
+        a.theme = Theme::Dark;
+        a.open_theme_picker();
+        a.theme_picker_move(2);
+        a.cancel_theme_picker();
+        assert_eq!(crate::config::load_theme(), None);
+        // Apply records the kept theme.
+        a.open_theme_picker();
+        a.theme_picker_move(2);
+        let kept = a.theme;
+        assert_ne!(kept, Theme::Dark);
+        a.apply_theme_picker();
+        assert_eq!(crate::config::load_theme(), Some(kept));
+    }
+    #[test]
+    fn new_picker_uses_saved_theme_over_default() {
+        use crate::highlight::Theme;
+        let _cfg = crate::config::isolated_test_config("picker-theme");
+        crate::config::save_theme(Theme::Nord);
+        let a = App::new_picker(vec![], false);
+        assert_eq!(a.theme, Theme::Nord);
+    }
+    #[test]
+    fn load_file_uses_saved_theme_over_autodetect() {
+        use crate::highlight::Theme;
+        let _cfg = crate::config::isolated_test_config("load");
+        crate::config::save_theme(Theme::Nord);
+        let app = App::load_file(std::path::Path::new("Cargo.toml"), false).unwrap();
+        assert_eq!(app.theme, Theme::Nord);
     }
 }

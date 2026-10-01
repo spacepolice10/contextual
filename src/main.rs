@@ -1,8 +1,9 @@
 mod app;
 mod cli;
+mod config;
 mod highlight;
 mod input;
-mod picker;
+mod file_picker;
 mod search;
 mod select;
 mod tui;
@@ -20,7 +21,7 @@ fn main() -> Result<()> {
     let mut app = match cli.path {
         Some(p) => app::App::load_file(&p, false)?,
         None => {
-            let (files, truncated) = picker::discover_files(std::path::Path::new("."));
+            let (files, truncated) = file_picker::discover_files(std::path::Path::new("."));
             app::App::new_picker(files, truncated)
         }
     };
@@ -47,7 +48,10 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
     use app::Mode;
     let area = f.area();
     match app.mode {
-        Mode::Picker => crate::ui::picker::render_picker(f, app, area),
+        Mode::Picker => crate::ui::file_picker::render_picker(f, app, area),
+        Mode::Viewer if app.theme_picker.is_some() => {
+            crate::ui::theme_picker::render_theme_picker(f, app, area)
+        }
         Mode::Viewer => crate::ui::viewer::render_viewer(f, app, area),
     }
 }

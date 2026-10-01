@@ -1,4 +1,4 @@
-use crate::picker::{picker_preview_visible, picker_prompt_line, read_preview_lines};
+use crate::file_picker::{picker_preview_visible, picker_prompt_line, read_preview_lines};
 use crate::ui::paint::{paint_ranges, paint_search_ranges};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -64,7 +64,7 @@ pub fn render_picker(f: &mut Frame, app: &mut crate::app::App, area: Rect) {
             } else {
                 for (i, m) in app.picker.filtered[start..end].iter().enumerate() {
                     if let Some(entry) = app.files.get(m.entry_idx) {
-                        let full = crate::picker::display_path(entry);
+                        let full = crate::file_picker::display_path(entry);
                         let shown: String = full.chars().take(row_w.max(1)).collect();
                         let n = shown.chars().count();
                         let mut spans = vec![Span::raw(shown)];
@@ -105,7 +105,7 @@ pub fn render_picker(f: &mut Frame, app: &mut crate::app::App, area: Rect) {
                         vec![Line::from(Span::styled("No matches", dim))],
                     ),
                     Some(entry) => {
-                        let shown = crate::picker::display_path(entry);
+                        let shown = crate::file_picker::display_path(entry);
                         let (lines, note) = read_preview_lines(&entry.path, 200);
                         let text = lines.join("\n");
                         let title = match note {

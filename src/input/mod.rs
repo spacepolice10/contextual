@@ -1,4 +1,4 @@
-pub mod picker;
+pub mod file_picker;
 pub mod viewer;
 
 use anyhow::Result;
@@ -14,7 +14,7 @@ pub fn handle(app: &mut crate::app::App, code: KeyCode, mods: KeyModifiers) -> R
         return Ok(true);
     }
     match app.mode {
-        Mode::Picker => picker::handle_picker(app, code, mods),
+        Mode::Picker => file_picker::handle_picker(app, code, mods),
         Mode::Viewer => viewer::handle_viewer(app, code, mods),
     }
 }

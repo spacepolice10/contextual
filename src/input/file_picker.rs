@@ -58,8 +58,8 @@ pub(super) fn handle_picker(
 mod tests {
     use crate::input::handle;
     use crossterm::event::{KeyCode, KeyModifiers};
-    fn picker_entry(path: &str) -> crate::picker::FileEntry {
-        crate::picker::FileEntry {
+    fn picker_entry(path: &str) -> crate::file_picker::FileEntry {
+        crate::file_picker::FileEntry {
             name: path.rsplit('/').next().unwrap_or(path).to_string(),
             path: std::path::PathBuf::from(path),
             size: 0,
@@ -116,12 +116,12 @@ mod tests {
         std::fs::write(&second, "second\n").unwrap();
         let mut a = crate::app::App::new_picker(
             vec![
-                crate::picker::FileEntry {
+                crate::file_picker::FileEntry {
                     name: "first.txt".to_string(),
                     path: first,
                     size: 6,
                 },
-                crate::picker::FileEntry {
+                crate::file_picker::FileEntry {
                     name: "second.txt".to_string(),
                     path: second,
                     size: 7,

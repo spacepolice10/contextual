@@ -12,7 +12,6 @@ pub fn viewer_hint(searching: bool) -> &'static str {
 }
 
 /// Status mode tag for an active visual selection (`""` when none).
-/// Commenting input covers its own `Comment…` tag via [`comment_prompt`].
 pub fn visual_tag(visual: Option<crate::select::Selection>) -> &'static str {
     match visual {
         Some(s) if s.kind == crate::select::SelectKind::Line => "--VISUAL LINE--",
@@ -24,12 +23,6 @@ pub fn visual_tag(visual: Option<crate::select::Selection>) -> &'static str {
 /// Trailing status count (`[n comments]`), shown once comments exist.
 pub fn comments_tag(n: usize) -> String {
     format!(" [{n} comments]")
-}
-
-/// Status row 1 while typing a note: `Comment on <file:line>: <draft>`
-/// with a 1-based line; the block cursor cell is appended by `render`.
-pub fn comment_prompt(file: &str, line: usize, draft: &str) -> String {
-    format!("Comment on {file}:{line}: {draft}")
 }
 
 /// Left status + right-aligned hint padded to `width` chars (char count,
@@ -104,12 +97,5 @@ mod tests {
     fn comments_tag_counts() {
         assert_eq!(comments_tag(0), " [0 comments]");
         assert_eq!(comments_tag(2), " [2 comments]");
-    }
-    #[test]
-    fn comment_prompt_format() {
-        assert_eq!(
-            comment_prompt("Cargo.toml", 3, "ok"),
-            "Comment on Cargo.toml:3: ok"
-        );
     }
 }

@@ -165,7 +165,7 @@ pub fn read_preview_lines(path: &Path, max_lines: usize) -> (Vec<String>, Option
     (lines, note)
 }
 
-// src/picker.rs tests
+// src/file_picker.rs tests
 #[cfg(test)]
 mod tests {
     use super::*;
