@@ -222,11 +222,38 @@ const LIGHT_BG: &[Color] = &[
 ];
 
 pub fn depth_style(depth: usize, theme: Theme) -> Style {
+    Style::default().bg(depth_color(depth, theme))
+}
+
+fn depth_color(depth: usize, theme: Theme) -> Color {
     let palette = match theme {
         Theme::Dark => DARK_BG,
         Theme::Light => LIGHT_BG,
     };
-    Style::default().bg(palette[depth % palette.len()])
+    palette[depth % palette.len()]
+}
+
+fn shift_channel(v: u8, delta: isize) -> u8 {
+    (v as isize + delta).clamp(0, 255) as u8
+}
+
+/// Frame around a block: the same depth hue, pushed brighter on dark
+/// themes and deeper on light ones so the ring reads against both the
+/// block and the terminal background.
+pub fn frame_style(depth: usize, theme: Theme) -> Style {
+    let delta = match theme {
+        Theme::Dark => 40,
+        Theme::Light => -36,
+    };
+    let color = match depth_color(depth, theme) {
+        Color::Rgb(r, g, b) => Color::Rgb(
+            shift_channel(r, delta),
+            shift_channel(g, delta),
+            shift_channel(b, delta),
+        ),
+        other => other,
+    };
+    Style::default().bg(color)
 }
 
 /// Depth of a node (roots are 0), walking parent pointers.
@@ -309,74 +336,48 @@ pub fn draw_canvas(
             set(&mut grid, *cx, bus + 1, '│', Style::default());
         }
     }
-    // Boxes with rounded corners, centered ports, optional cross-link row.
-    // Every cell of a box carries its depth background; the focused box
-    // additionally gets REVERSED.
+    // Frameless blocks: a 1-cell frame ring in the bright variant of the
+    // depth color, content rows on the depth background. Connector lines
+    // touch the outer frame directly, so there are no port glyphs.
     for r in layout {
         let node = graph
             .nodes
             .iter()
             .find(|n| n.id == r.id)
             .expect("node for known rect");
-        let mut style = depth_style(node_depth(graph, r.id), theme);
+        let depth = node_depth(graph, r.id);
+        let mut content = depth_style(depth, theme);
+        let mut frame = frame_style(depth, theme);
         if selected == Some(r.id) {
-            style = style.add_modifier(Modifier::REVERSED);
+            content = content.add_modifier(Modifier::REVERSED);
+            frame = frame.add_modifier(Modifier::REVERSED);
         }
-        let cx = r.x + r.w / 2 - r.x; // center offset inside the box
-        for (i, y) in (r.y..r.y + r.h).enumerate() {
-            match i {
-                0 => {
-                    for dx in 0..r.w {
-                        let ch = if dx == 0 {
-                            '╭'
-                        } else if dx == r.w - 1 {
-                            '╮'
-                        } else if dx == cx {
-                            '┬'
-                        } else {
-                            '─'
-                        };
-                        set(&mut grid, r.x + dx, y, ch, style);
-                    }
-                }
-                1 => {
-                    set(&mut grid, r.x, y, '│', style);
-                    set(&mut grid, r.x + 1, y, ' ', style);
-                    for (j, ch) in node.title.chars().enumerate() {
-                        set(&mut grid, r.x + 2 + j, y, ch, style);
-                    }
-                    set(&mut grid, r.x + 2 + node.title.chars().count(), y, ' ', style);
-                    set(&mut grid, r.x + r.w - 1, y, '│', style);
-                }
-                _ if i == r.h - 1 => {
-                    for dx in 0..r.w {
-                        let ch = if dx == 0 {
-                            '╰'
-                        } else if dx == r.w - 1 {
-                            '╯'
-                        } else if dx == cx {
-                            '┴'
-                        } else {
-                            '─'
-                        };
-                        set(&mut grid, r.x + dx, y, ch, style);
-                    }
-                }
-                _ => {
-                    // Cross-link row: `⇢ targets`, truncated to inner width.
-                    let inner = r.w - 2;
-                    let text: String = format!("⇢ {}", cross_targets(graph, r.id).join(", "));
-                    let mut shown: String = text.chars().take(inner).collect();
-                    while shown.chars().count() < inner {
-                        shown.push(' ');
-                    }
-                    set(&mut grid, r.x, y, '│', style);
-                    for (j, ch) in shown.chars().enumerate() {
-                        set(&mut grid, r.x + 1 + j, y, ch, style);
-                    }
-                    set(&mut grid, r.x + r.w - 1, y, '│', style);
+        for y in r.y..r.y + r.h {
+            for x in r.x..r.x + r.w {
+                if y == r.y || y == r.y + r.h - 1 || x == r.x || x == r.x + r.w - 1 {
+                    set(&mut grid, x, y, ' ', frame);
                 }
             }
+        }
+        // One inner text row: left-padded, space-filled to the inner width.
+        let put_row = |grid: &mut Vec<Vec<Cell>>, y: usize, text: &str| {
+            let inner = r.w - 2;
+            let mut shown = format!(" {text}");
+            while shown.chars().count() < inner {
+                shown.push(' ');
+            }
+            let shown: String = shown.chars().take(inner).collect();
+            for (j, ch) in shown.chars().enumerate() {
+                set(grid, r.x + 1 + j, y, ch, content);
+            }
+        };
+        let mut row = r.y + 1;
+        put_row(&mut grid, row, &node.title);
+        row += 1;
+        if row < r.y + r.h - 1 {
+            // Cross-link row: `⇢ targets`.
+            let text = format!("⇢ {}", cross_targets(graph, r.id).join(", "));
+            put_row(&mut grid, row, &text);
         }
     }
     grid
@@ -598,12 +599,52 @@ mod tests {
         let (layout, w, h) = layout_boxes(&g);
         let grid = draw_canvas(&g, &layout, None, w, h, crate::highlight::Theme::Dark);
         let text = grid_text(&grid);
-        // Root box: ╭─┬─╮ / │ R │ / ╰─┴─╯ ; straight │ stem; child box below.
-        assert!(text[0].contains("╭─┬─╮"), "grid: {text:?}");
-        assert!(text[1].contains("│ R │"), "grid: {text:?}");
-        assert!(text.iter().any(|l| l.contains("│ C │")), "grid: {text:?}");
-        let stem_row = 3;
+        // Frameless blocks: title rows, straight │ stem between the blocks.
+        assert!(text.iter().any(|l| l.contains('R')), "grid: {text:?}");
+        assert!(text.iter().any(|l| l.contains('C')), "grid: {text:?}");
+        assert!(
+            !text.iter().any(|l| l.contains('╭') || l.contains('╰')),
+            "no thin borders: {text:?}"
+        );
+        let r = layout.iter().find(|r| r.id == root).unwrap();
+        // Stem starts at the outer frame bottom and runs to the child frame.
+        let stem_row = r.y + r.h;
         assert_eq!(text[stem_row].chars().nth(2), Some('│'), "grid: {text:?}");
+    }
+
+    #[test]
+    fn frame_style_is_brighter_variant_of_depth() {
+        use crate::highlight::Theme;
+        fn rgb(s: ratatui::style::Style) -> (u8, u8, u8) {
+            match s.bg {
+                Some(ratatui::style::Color::Rgb(r, g, b)) => (r, g, b),
+                other => panic!("expected rgb bg, got {other:?}"),
+            }
+        }
+        // Dark theme: frame channels are lifted.
+        let (br, bg, bb) = rgb(depth_style(0, Theme::Dark));
+        let (fr, fg, fb) = rgb(frame_style(0, Theme::Dark));
+        assert!(fr >= br && fg >= bg && fb >= bb);
+        assert!((fr, fg, fb) != (br, bg, bb));
+        // Light theme: frame channels are deepened for contrast.
+        let (br, bg, bb) = rgb(depth_style(1, Theme::Light));
+        let (fr, fg, fb) = rgb(frame_style(1, Theme::Light));
+        assert!(fr <= br && fg <= bg && fb <= bb);
+        assert!((fr, fg, fb) != (br, bg, bb));
+    }
+
+    #[test]
+    fn draw_block_has_frame_ring_and_content() {
+        use crate::highlight::Theme;
+        let mut g = PlanGraph::new();
+        let root = g.create_node("R", None).unwrap();
+        let (layout, w, h) = layout_boxes(&g);
+        let grid = draw_canvas(&g, &layout, None, w, h, Theme::Dark);
+        let r = layout.iter().find(|r| r.id == root).unwrap();
+        // Outer corner = frame style, space glyph.
+        assert_eq!(grid[r.y][r.x], (' ', frame_style(0, Theme::Dark)));
+        // Title cell = depth background.
+        assert_eq!(grid[r.y + 1][r.x + 1].1, depth_style(0, Theme::Dark));
     }
 
     #[test]
@@ -649,11 +690,10 @@ mod tests {
         let (layout, w, h) = layout_boxes(&g);
         let grid = draw_canvas(&g, &layout, None, w, h, Theme::Dark);
         let r = |id| *layout.iter().find(|r| r.id == id).unwrap();
-        let root_bg = depth_style(0, Theme::Dark);
-        let child_bg = depth_style(1, Theme::Dark);
-        // Top-left corner cells carry their depth background.
-        assert_eq!(grid[r(root).y][r(root).x].1, root_bg);
-        assert_eq!(grid[r(child).y][r(child).x].1, child_bg);
+        // Outer corners = bright frame; title cells = depth background.
+        assert_eq!(grid[r(root).y][r(root).x].1, frame_style(0, Theme::Dark));
+        assert_eq!(grid[r(root).y + 1][r(root).x + 1].1, depth_style(0, Theme::Dark));
+        assert_eq!(grid[r(child).y + 1][r(child).x + 1].1, depth_style(1, Theme::Dark));
     }
 
     #[test]
@@ -662,15 +702,16 @@ mod tests {
         let mut g = PlanGraph::new();
         let root = g.create_node("R", None).unwrap();
         let (layout, w, h) = layout_boxes(&g);
-        let selected_style = depth_style(0, Theme::Dark).add_modifier(Modifier::REVERSED);
+        let r = layout.iter().find(|r| r.id == root).unwrap();
         let grid = draw_canvas(&g, &layout, Some(root), w, h, Theme::Dark);
-        assert!(
-            grid.iter().flatten().all(|(_, st)| st == &selected_style),
-            "every cell of the single box must carry depth bg + reversed"
-        );
+        // Frame ring and content both carry REVERSED on top of their bg.
+        let frame = frame_style(0, Theme::Dark).add_modifier(Modifier::REVERSED);
+        let base = depth_style(0, Theme::Dark).add_modifier(Modifier::REVERSED);
+        assert_eq!(grid[r.y][r.x].1, frame);
+        assert_eq!(grid[r.y + 1][r.x + 1].1, base);
         let plain = draw_canvas(&g, &layout, None, w, h, Theme::Dark);
-        let base = depth_style(0, Theme::Dark);
-        assert!(plain.iter().flatten().all(|(_, st)| *st == base));
+        assert_eq!(plain[r.y][r.x].1, frame_style(0, Theme::Dark));
+        assert_eq!(plain[r.y + 1][r.x + 1].1, depth_style(0, Theme::Dark));
     }
 
     #[test]
