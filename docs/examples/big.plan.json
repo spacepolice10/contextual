@@ -1,0 +1,663 @@
+{
+  "nodes": [
+    {
+      "id": 1,
+      "title": "Учёт финансов",
+      "parent": null,
+      "kind": "action"
+    },
+    {
+      "id": 2,
+      "title": "Транзакции",
+      "parent": 1,
+      "kind": "action"
+    },
+    {
+      "id": 3,
+      "title": "Создать транзакцию",
+      "parent": 2,
+      "kind": "action"
+    },
+    {
+      "id": 4,
+      "title": "Транзакция создана",
+      "parent": 3,
+      "kind": "event"
+    },
+    {
+      "id": 5,
+      "title": "Проверка баланса",
+      "parent": 3,
+      "kind": "query"
+    },
+    {
+      "id": 6,
+      "title": "Лента обновлена",
+      "parent": 3,
+      "kind": "view"
+    },
+    {
+      "id": 7,
+      "title": "Импорт выписки",
+      "parent": 2,
+      "kind": "action"
+    },
+    {
+      "id": 8,
+      "title": "Выписка импортирована",
+      "parent": 7,
+      "kind": "event"
+    },
+    {
+      "id": 9,
+      "title": "Сопоставление категорий",
+      "parent": 7,
+      "kind": "action"
+    },
+    {
+      "id": 10,
+      "title": "Дубликаты найдены",
+      "parent": 7,
+      "kind": "event"
+    },
+    {
+      "id": 11,
+      "title": "Лента транзакций",
+      "parent": 2,
+      "kind": "view"
+    },
+    {
+      "id": 12,
+      "title": "Транзакции за месяц",
+      "parent": 11,
+      "kind": "query"
+    },
+    {
+      "id": 13,
+      "title": "Поиск по получателю",
+      "parent": 11,
+      "kind": "query"
+    },
+    {
+      "id": 14,
+      "title": "Фильтр по категории",
+      "parent": 11,
+      "kind": "query"
+    },
+    {
+      "id": 15,
+      "title": "Удалить транзакцию",
+      "parent": 2,
+      "kind": "action"
+    },
+    {
+      "id": 16,
+      "title": "Транзакция удалена",
+      "parent": 15,
+      "kind": "event"
+    },
+    {
+      "id": 17,
+      "title": "Пересчёт итогов",
+      "parent": 15,
+      "kind": "action"
+    },
+    {
+      "id": 18,
+      "title": "Подтверждение удаления",
+      "parent": 15,
+      "kind": "view"
+    },
+    {
+      "id": 19,
+      "title": "Регулярный платёж",
+      "parent": 2,
+      "kind": "action"
+    },
+    {
+      "id": 20,
+      "title": "Платёж запланирован",
+      "parent": 19,
+      "kind": "event"
+    },
+    {
+      "id": 21,
+      "title": "Платёж списан",
+      "parent": 19,
+      "kind": "event"
+    },
+    {
+      "id": 22,
+      "title": "Расписание платежей",
+      "parent": 19,
+      "kind": "view"
+    },
+    {
+      "id": 23,
+      "title": "Бюджеты",
+      "parent": 1,
+      "kind": "action"
+    },
+    {
+      "id": 24,
+      "title": "Установить бюджет",
+      "parent": 23,
+      "kind": "action"
+    },
+    {
+      "id": 25,
+      "title": "Бюджет установлен",
+      "parent": 24,
+      "kind": "event"
+    },
+    {
+      "id": 26,
+      "title": "Лимиты по категориям",
+      "parent": 24,
+      "kind": "view"
+    },
+    {
+      "id": 27,
+      "title": "История бюджетов",
+      "parent": 24,
+      "kind": "query"
+    },
+    {
+      "id": 28,
+      "title": "Бюджет превышен",
+      "parent": 23,
+      "kind": "event"
+    },
+    {
+      "id": 29,
+      "title": "Предупреждение показано",
+      "parent": 28,
+      "kind": "view"
+    },
+    {
+      "id": 30,
+      "title": "Уведомление отправлено",
+      "parent": 28,
+      "kind": "action"
+    },
+    {
+      "id": 31,
+      "title": "Детализация перерасхода",
+      "parent": 28,
+      "kind": "query"
+    },
+    {
+      "id": 32,
+      "title": "Виджет бюджета",
+      "parent": 23,
+      "kind": "view"
+    },
+    {
+      "id": 33,
+      "title": "Остаток по бюджету",
+      "parent": 32,
+      "kind": "query"
+    },
+    {
+      "id": 34,
+      "title": "Прогресс месяца",
+      "parent": 32,
+      "kind": "query"
+    },
+    {
+      "id": 35,
+      "title": "Настройки виджета",
+      "parent": 32,
+      "kind": "action"
+    },
+    {
+      "id": 36,
+      "title": "Закрыть месяц",
+      "parent": 23,
+      "kind": "action"
+    },
+    {
+      "id": 37,
+      "title": "Месяц закрыт",
+      "parent": 36,
+      "kind": "event"
+    },
+    {
+      "id": 38,
+      "title": "Отчёт по месяцу",
+      "parent": 36,
+      "kind": "view"
+    },
+    {
+      "id": 39,
+      "title": "Перенос остатка",
+      "parent": 36,
+      "kind": "action"
+    },
+    {
+      "id": 40,
+      "title": "Копилка",
+      "parent": 23,
+      "kind": "view"
+    },
+    {
+      "id": 41,
+      "title": "Цели накоплений",
+      "parent": 40,
+      "kind": "query"
+    },
+    {
+      "id": 42,
+      "title": "Прогресс цели",
+      "parent": 40,
+      "kind": "query"
+    },
+    {
+      "id": 43,
+      "title": "Пополнить копилку",
+      "parent": 40,
+      "kind": "action"
+    },
+    {
+      "id": 44,
+      "title": "Отчёты",
+      "parent": 1,
+      "kind": "action"
+    },
+    {
+      "id": 45,
+      "title": "Экспортировать отчёт",
+      "parent": 44,
+      "kind": "action"
+    },
+    {
+      "id": 46,
+      "title": "Отчёт сгенерирован",
+      "parent": 45,
+      "kind": "event"
+    },
+    {
+      "id": 47,
+      "title": "CSV выгружен",
+      "parent": 45,
+      "kind": "view"
+    },
+    {
+      "id": 48,
+      "title": "Параметры экспорта",
+      "parent": 45,
+      "kind": "query"
+    },
+    {
+      "id": 49,
+      "title": "Дашборд",
+      "parent": 44,
+      "kind": "view"
+    },
+    {
+      "id": 50,
+      "title": "График расходов",
+      "parent": 49,
+      "kind": "query"
+    },
+    {
+      "id": 51,
+      "title": "Топ категорий",
+      "parent": 49,
+      "kind": "query"
+    },
+    {
+      "id": 52,
+      "title": "Сравнение с прошлым месяцем",
+      "parent": 49,
+      "kind": "query"
+    },
+    {
+      "id": 53,
+      "title": "График расходов",
+      "parent": 44,
+      "kind": "view"
+    },
+    {
+      "id": 54,
+      "title": "Расходы по дням",
+      "parent": 53,
+      "kind": "query"
+    },
+    {
+      "id": 55,
+      "title": "Средний чек",
+      "parent": 53,
+      "kind": "query"
+    },
+    {
+      "id": 56,
+      "title": "Аномалии трат",
+      "parent": 53,
+      "kind": "event"
+    },
+    {
+      "id": 57,
+      "title": "Налоговая сводка",
+      "parent": 44,
+      "kind": "query"
+    },
+    {
+      "id": 58,
+      "title": "Доходы за год",
+      "parent": 57,
+      "kind": "query"
+    },
+    {
+      "id": 59,
+      "title": "Вычеты",
+      "parent": 57,
+      "kind": "view"
+    },
+    {
+      "id": 60,
+      "title": "PDF для налоговой",
+      "parent": 57,
+      "kind": "action"
+    },
+    {
+      "id": 61,
+      "title": "Поделиться отчётом",
+      "parent": 44,
+      "kind": "action"
+    },
+    {
+      "id": 62,
+      "title": "Ссылка создана",
+      "parent": 61,
+      "kind": "event"
+    },
+    {
+      "id": 63,
+      "title": "Доступ по ссылке",
+      "parent": 61,
+      "kind": "view"
+    },
+    {
+      "id": 64,
+      "title": "Отозвать доступ",
+      "parent": 61,
+      "kind": "action"
+    },
+    {
+      "id": 65,
+      "title": "Счета",
+      "parent": 1,
+      "kind": "action"
+    },
+    {
+      "id": 66,
+      "title": "Открыть счёт",
+      "parent": 65,
+      "kind": "action"
+    },
+    {
+      "id": 67,
+      "title": "Счёт открыт",
+      "parent": 66,
+      "kind": "event"
+    },
+    {
+      "id": 68,
+      "title": "Список счетов",
+      "parent": 66,
+      "kind": "view"
+    },
+    {
+      "id": 69,
+      "title": "Выбор валюты",
+      "parent": 66,
+      "kind": "query"
+    },
+    {
+      "id": 70,
+      "title": "Перевод между счетами",
+      "parent": 65,
+      "kind": "action"
+    },
+    {
+      "id": 71,
+      "title": "Перевод выполнен",
+      "parent": 70,
+      "kind": "event"
+    },
+    {
+      "id": 72,
+      "title": "Курс конвертации",
+      "parent": 70,
+      "kind": "query"
+    },
+    {
+      "id": 73,
+      "title": "Комиссия рассчитана",
+      "parent": 70,
+      "kind": "event"
+    },
+    {
+      "id": 74,
+      "title": "Остаток по счёту",
+      "parent": 65,
+      "kind": "query"
+    },
+    {
+      "id": 75,
+      "title": "Доступные средства",
+      "parent": 74,
+      "kind": "query"
+    },
+    {
+      "id": 76,
+      "title": "Замороженные суммы",
+      "parent": 74,
+      "kind": "view"
+    },
+    {
+      "id": 77,
+      "title": "Обновить баланс",
+      "parent": 74,
+      "kind": "action"
+    },
+    {
+      "id": 78,
+      "title": "Счёт заблокирован",
+      "parent": 65,
+      "kind": "event"
+    },
+    {
+      "id": 79,
+      "title": "Баннер блокировки",
+      "parent": 78,
+      "kind": "view"
+    },
+    {
+      "id": 80,
+      "title": "Обращение в поддержку",
+      "parent": 78,
+      "kind": "action"
+    },
+    {
+      "id": 81,
+      "title": "Причины блокировки",
+      "parent": 78,
+      "kind": "query"
+    },
+    {
+      "id": 82,
+      "title": "Архив счетов",
+      "parent": 65,
+      "kind": "view"
+    },
+    {
+      "id": 83,
+      "title": "Закрытые счета",
+      "parent": 82,
+      "kind": "query"
+    },
+    {
+      "id": 84,
+      "title": "Восстановить счёт",
+      "parent": 82,
+      "kind": "action"
+    },
+    {
+      "id": 85,
+      "title": "История операций",
+      "parent": 82,
+      "kind": "query"
+    },
+    {
+      "id": 86,
+      "title": "Уведомления",
+      "parent": 1,
+      "kind": "action"
+    },
+    {
+      "id": 87,
+      "title": "Напомнить о платеже",
+      "parent": 86,
+      "kind": "action"
+    },
+    {
+      "id": 88,
+      "title": "Напоминание отправлено",
+      "parent": 87,
+      "kind": "event"
+    },
+    {
+      "id": 89,
+      "title": "Настройки напоминаний",
+      "parent": 87,
+      "kind": "view"
+    },
+    {
+      "id": 90,
+      "title": "Частота уведомлений",
+      "parent": 87,
+      "kind": "query"
+    },
+    {
+      "id": 91,
+      "title": "Пуш о трате",
+      "parent": 86,
+      "kind": "event"
+    },
+    {
+      "id": 92,
+      "title": "Карточка траты",
+      "parent": 91,
+      "kind": "view"
+    },
+    {
+      "id": 93,
+      "title": "Отключить пуши",
+      "parent": 91,
+      "kind": "action"
+    },
+    {
+      "id": 94,
+      "title": "Порог уведомлений",
+      "parent": 91,
+      "kind": "query"
+    },
+    {
+      "id": 95,
+      "title": "Центр уведомлений",
+      "parent": 86,
+      "kind": "view"
+    },
+    {
+      "id": 96,
+      "title": "Непрочитанные",
+      "parent": 95,
+      "kind": "query"
+    },
+    {
+      "id": 97,
+      "title": "Пометить прочитанным",
+      "parent": 95,
+      "kind": "action"
+    },
+    {
+      "id": 98,
+      "title": "Фильтр по типам",
+      "parent": 95,
+      "kind": "query"
+    },
+    {
+      "id": 99,
+      "title": "Дайджест недели",
+      "parent": 86,
+      "kind": "action"
+    },
+    {
+      "id": 100,
+      "title": "Дайджест собран",
+      "parent": 99,
+      "kind": "event"
+    },
+    {
+      "id": 101,
+      "title": "Письмо отправлено",
+      "parent": 99,
+      "kind": "event"
+    },
+    {
+      "id": 102,
+      "title": "Подписка на дайджест",
+      "parent": 99,
+      "kind": "view"
+    },
+    {
+      "id": 103,
+      "title": "Критический алерт",
+      "parent": 86,
+      "kind": "event"
+    },
+    {
+      "id": 104,
+      "title": "Баннер алерта",
+      "parent": 103,
+      "kind": "view"
+    },
+    {
+      "id": 105,
+      "title": "Эскалация",
+      "parent": 103,
+      "kind": "action"
+    },
+    {
+      "id": 106,
+      "title": "Журнал алертов",
+      "parent": 103,
+      "kind": "query"
+    }
+  ],
+  "cross_links": [
+    {
+      "from": 4,
+      "to": 11
+    },
+    {
+      "from": 37,
+      "to": 38
+    },
+    {
+      "from": 71,
+      "to": 74
+    },
+    {
+      "from": 100,
+      "to": 95
+    },
+    {
+      "from": 28,
+      "to": 95
+    }
+  ],
+  "next_id": 107
+}

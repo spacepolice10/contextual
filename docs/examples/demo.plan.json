@@ -1,0 +1,36 @@
+{
+  "nodes": [
+    {
+      "id": 1,
+      "title": "Запустить продукт",
+      "parent": null
+    },
+    {
+      "id": 2,
+      "title": "Дизайн",
+      "parent": 1
+    },
+    {
+      "id": 3,
+      "title": "Бэкенд",
+      "parent": 1
+    },
+    {
+      "id": 4,
+      "title": "API для отчётов",
+      "parent": 3
+    },
+    {
+      "id": 5,
+      "title": "Риски",
+      "parent": null
+    }
+  ],
+  "cross_links": [
+    {
+      "from": 5,
+      "to": 4
+    }
+  ],
+  "next_id": 6
+}
