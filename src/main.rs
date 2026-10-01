@@ -4,6 +4,7 @@ mod config;
 mod highlight;
 mod input;
 mod file_picker;
+mod plan;
 mod search;
 mod select;
 mod tui;
@@ -18,6 +19,12 @@ use std::{io, time::Duration};
 
 fn main() -> Result<()> {
     let cli = cli::Cli::parse();
+
+    // Handle plan subcommands before entering TUI
+    if let Some(subcmd) = &cli.plan {
+        return handle_plan_command(subcmd, cli.plan_file.as_deref());
+    }
+
     let mut app = match cli.path {
         Some(p) => app::App::load_file(&p, false)?,
         None => {
@@ -44,6 +51,95 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+fn handle_plan_command(
+    subcmd: &cli::PlanSubcommand,
+    plan_file: Option<&std::path::Path>,
+) -> Result<()> {
+    use crate::plan::commands::{execute_command, PlanCommand};
+    use crate::plan::model::PlanGraph;
+    use cli::PlanSubcommand;
+
+    let default_path = dirs::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("contextual")
+        .join("plan.json");
+    let path = plan_file.unwrap_or(&default_path);
+
+    let mut graph = match PlanGraph::load(path) {
+        Ok(g) => g,
+        // Missing file means a fresh plan; an unreadable *existing* file is
+        // an error — silently starting over would overwrite user data.
+        Err(_) if !path.exists() => PlanGraph::new(),
+        Err(e) => return Err(e.into()),
+    };
+
+    let cmd = match subcmd {
+        PlanSubcommand::Plan => {
+            // TUI entry for Plan mode happens through the picker
+            // (open a .plan.json file); there is nothing to run headlessly.
+            println!("Plan TUI: run without arguments and open a .plan.json file from the picker.");
+            return Ok(());
+        }
+        PlanSubcommand::PlanCreate { path } => {
+            let new_graph = PlanGraph::new();
+            new_graph.save(path)?;
+            println!("Created new plan: {}", path.display());
+            return Ok(());
+        }
+        PlanSubcommand::PlanOpen { path } => {
+            let loaded = PlanGraph::load(path)?;
+            println!("Opened plan: {}", path.display());
+            println!("Nodes: {}", loaded.nodes.len());
+            return Ok(());
+        }
+        PlanSubcommand::NodeCreate { title, parent_id, kind } => PlanCommand::NodeCreate {
+            title: title.clone(),
+            parent_id: *parent_id,
+            kind: match kind.as_deref() {
+                None => None,
+                Some(s) => Some(crate::plan::model::NodeKind::parse(s).ok_or_else(|| {
+                    anyhow::anyhow!("Invalid kind (action|view|event|query)")
+                })?),
+            },
+        },
+        PlanSubcommand::NodeSetKind { id, kind } => PlanCommand::NodeSetKind {
+            id: *id,
+            kind: crate::plan::model::NodeKind::parse(kind)
+                .ok_or_else(|| anyhow::anyhow!("Invalid kind (action|view|event|query)"))?,
+        },
+        PlanSubcommand::NodeUpdate { id, new_title } => PlanCommand::NodeUpdate {
+            id: *id,
+            new_title: new_title.clone(),
+        },
+        PlanSubcommand::NodeDelete { id } => PlanCommand::NodeDelete { id: *id },
+        PlanSubcommand::NodeList => PlanCommand::NodeList,
+        PlanSubcommand::NodeShow { id } => PlanCommand::NodeShow { id: *id },
+        PlanSubcommand::LinkCreate { parent_id, child_id } => PlanCommand::LinkCreate {
+            parent_id: *parent_id,
+            child_id: *child_id,
+        },
+        PlanSubcommand::LinkRemove { parent_id, child_id } => PlanCommand::LinkRemove {
+            parent_id: *parent_id,
+            child_id: *child_id,
+        },
+        PlanSubcommand::ConnectCreate { from_id, to_id } => PlanCommand::ConnectCreate {
+            from_id: *from_id,
+            to_id: *to_id,
+        },
+        PlanSubcommand::ConnectRemove { from_id, to_id } => PlanCommand::ConnectRemove {
+            from_id: *from_id,
+            to_id: *to_id,
+        },
+    };
+
+    let result = execute_command(&mut graph, &cmd)?;
+    println!("{}", result);
+    if crate::plan::commands::is_mutation(&cmd) {
+        graph.save(path)?;
+    }
+    Ok(())
+}
+
 fn render(f: &mut ratatui::Frame, app: &mut app::App) {
     use app::Mode;
     let area = f.area();
@@ -53,5 +149,58 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
             crate::ui::theme_picker::render_theme_picker(f, app, area)
         }
         Mode::Viewer => crate::ui::viewer::render_viewer(f, app, area),
+        Mode::Plan => {
+            if let Some(pm) = &mut app.plan {
+                crate::plan::render_plan(f, pm, area, app.theme);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn corrupt_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("ctx_corrupt_{tag}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn corrupt_plan_file_errors_instead_of_overwriting() {
+        let dir = corrupt_dir("err");
+        let path = dir.join("plan.json");
+        std::fs::write(&path, "corrupt!!!").unwrap();
+        let cmd = cli::PlanSubcommand::NodeCreate {
+            title: "X".to_string(),
+            parent_id: None,
+            kind: None,
+        };
+        let result = handle_plan_command(&cmd, Some(&path));
+        assert!(result.is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "corrupt!!!");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn missing_plan_file_starts_fresh_and_saves() {
+        let dir = corrupt_dir("fresh");
+        let path = dir.join("plan.json");
+        let cmd = cli::PlanSubcommand::NodeCreate {
+            title: "Fresh".to_string(),
+            parent_id: None,
+            kind: Some("event".to_string()),
+        };
+        handle_plan_command(&cmd, Some(&path)).unwrap();
+        let loaded = crate::plan::model::PlanGraph::load(&path).unwrap();
+        assert_eq!(loaded.nodes.len(), 1);
+        assert_eq!(loaded.nodes[0].title, "Fresh");
+        assert_eq!(
+            loaded.nodes[0].kind,
+            crate::plan::model::NodeKind::Event
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

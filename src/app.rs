@@ -7,6 +7,8 @@ use ratatui::text::Span;
 pub enum Mode {
     Picker,
     Viewer,
+    #[allow(dead_code)] // Constructed in Task 5 (CLI) and Task 6 (picker)
+    Plan,
 }
 
 /// Memory-only annotation on a text span (Task 3 fills, Task 4 lists).
@@ -93,6 +95,8 @@ pub struct App {
     pub show_sidebar: bool,
     /// Theme-picker overlay (Shift+T in viewer); `None` when closed.
     pub theme_picker: Option<ThemePickerState>,
+    /// Plan mode state (Task 4).
+    pub plan: Option<crate::plan::PlanMode>,
 }
 
 impl App {
@@ -339,7 +343,8 @@ impl App {
     }
     /// Open the selected picker entry, replacing viewer state.
     /// Session comments (and sidebar visibility) survive the switch;
-    /// never quits (`Ok(false)`); empty selection is a noop.
+    /// plan files (`.plan.json` or JSON with a `"nodes"` key) open in
+    /// Plan mode instead. Never quits (`Ok(false)`); empty selection is a noop.
     pub fn open_selected_entry(&mut self) -> Result<bool> {
         let hit = self
             .picker
@@ -348,6 +353,12 @@ impl App {
             .map(|m| m.entry_idx);
         match hit.and_then(|i| self.files.get(i).cloned()) {
             Some(f) => {
+                if crate::file_picker::is_plan_file(&f.path) {
+                    let graph = crate::plan::model::PlanGraph::load(&f.path)?;
+                    self.plan = Some(crate::plan::PlanMode::new(graph, f.path.clone()));
+                    self.mode = Mode::Plan;
+                    return Ok(false);
+                }
                 let comments = std::mem::take(&mut self.comments);
                 let show_sidebar = self.show_sidebar;
                 *self = Self::load_file(&f.path, true)?;
@@ -479,6 +490,7 @@ impl App {
             comments: Vec::new(),
             show_sidebar: false,
             theme_picker: None,
+            plan: None,
         }
     }
     pub fn load_file(path: &Path, from_picker: bool) -> Result<Self> {
@@ -520,6 +532,7 @@ impl App {
             comments: Vec::new(),
             show_sidebar: false,
             theme_picker: None,
+            plan: None,
         })
     }
 }
@@ -559,6 +572,7 @@ mod tests {
             comments: Vec::new(),
             show_sidebar: false,
             theme_picker: None,
+            plan: None,
         }
     }
     #[test]
