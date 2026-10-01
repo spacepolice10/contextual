@@ -1,5 +1,5 @@
 use crate::highlight::Theme;
-use crate::plan::model::PlanGraph;
+use crate::plan::model::{NodeKind, PlanGraph};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -71,7 +71,11 @@ fn render_tree_node(
     };
     lines.push((
         node.id,
-        Line::from(format!("{prefix}{connector}{}{cross_marker}", node.title)),
+        Line::from(format!(
+            "{prefix}{connector}{} {}{cross_marker}",
+            node.kind.glyph(),
+            node.title
+        )),
     ));
     let kids = children(graph, node.id);
     let child_prefix = if is_root {
@@ -111,7 +115,7 @@ fn box_size(graph: &PlanGraph, id: u64) -> (usize, usize) {
         .iter()
         .find(|n| n.id == id)
         .expect("layout of a known node");
-    let w = node.title.chars().count() + 4;
+    let w = node.title.chars().count() + 2 + 4;
     let extra = if cross_targets(graph, id).is_empty() {
         0
     } else {
@@ -233,26 +237,31 @@ fn depth_color(depth: usize, theme: Theme) -> Color {
     palette[depth % palette.len()]
 }
 
-fn shift_channel(v: u8, delta: isize) -> u8 {
-    (v as isize + delta).clamp(0, 255) as u8
-}
+/// Frame colors per event-modeling category (vivid variants).
+/// Dark themes get bright tones, light themes deep ones for contrast.
+const KIND_DARK: &[(NodeKind, Color)] = &[
+    (NodeKind::Action, Color::Rgb(86, 140, 230)),
+    (NodeKind::View, Color::Rgb(90, 190, 120)),
+    (NodeKind::Event, Color::Rgb(216, 130, 48)),
+    (NodeKind::Query, Color::Rgb(170, 110, 220)),
+];
+const KIND_LIGHT: &[(NodeKind, Color)] = &[
+    (NodeKind::Action, Color::Rgb(40, 100, 200)),
+    (NodeKind::View, Color::Rgb(30, 150, 90)),
+    (NodeKind::Event, Color::Rgb(180, 95, 20)),
+    (NodeKind::Query, Color::Rgb(130, 70, 190)),
+];
 
-/// Frame around a block: the same depth hue, pushed brighter on dark
-/// themes and deeper on light ones so the ring reads against both the
-/// block and the terminal background.
-pub fn frame_style(depth: usize, theme: Theme) -> Style {
-    let delta = match theme {
-        Theme::Dark => 40,
-        Theme::Light => -36,
+pub fn kind_frame_style(kind: NodeKind, theme: Theme) -> Style {
+    let palette = match theme {
+        Theme::Dark => KIND_DARK,
+        Theme::Light => KIND_LIGHT,
     };
-    let color = match depth_color(depth, theme) {
-        Color::Rgb(r, g, b) => Color::Rgb(
-            shift_channel(r, delta),
-            shift_channel(g, delta),
-            shift_channel(b, delta),
-        ),
-        other => other,
-    };
+    let color = palette
+        .iter()
+        .find(|(k, _)| *k == kind)
+        .map(|(_, c)| *c)
+        .expect("palette covers every kind");
     Style::default().bg(color)
 }
 
@@ -336,9 +345,9 @@ pub fn draw_canvas(
             set(&mut grid, *cx, bus + 1, '│', Style::default());
         }
     }
-    // Frameless blocks: a 1-cell frame ring in the bright variant of the
-    // depth color, content rows on the depth background. Connector lines
-    // touch the outer frame directly, so there are no port glyphs.
+    // Frameless blocks: a 1-cell frame ring in the node's category color,
+    // content rows on the depth background with a kind glyph. Connector
+    // lines touch the outer frame directly, so there are no port glyphs.
     for r in layout {
         let node = graph
             .nodes
@@ -347,7 +356,7 @@ pub fn draw_canvas(
             .expect("node for known rect");
         let depth = node_depth(graph, r.id);
         let mut content = depth_style(depth, theme);
-        let mut frame = frame_style(depth, theme);
+        let mut frame = kind_frame_style(node.kind, theme);
         if selected == Some(r.id) {
             content = content.add_modifier(Modifier::REVERSED);
             frame = frame.add_modifier(Modifier::REVERSED);
@@ -372,7 +381,7 @@ pub fn draw_canvas(
             }
         };
         let mut row = r.y + 1;
-        put_row(&mut grid, row, &node.title);
+        put_row(&mut grid, row, &format!("{} {}", node.kind.glyph(), node.title));
         row += 1;
         if row < r.y + r.h - 1 {
             // Cross-link row: `⇢ targets`.
@@ -490,9 +499,9 @@ mod tests {
         g.create_node("Child A", Some(root)).unwrap();
         g.create_node("Child B", Some(root)).unwrap();
         let text = text_of(&render_tree(&g));
-        assert!(text.iter().any(|l| l == "Root"), "lines: {text:?}");
-        assert!(text.iter().any(|l| l == "├─ Child A"), "lines: {text:?}");
-        assert!(text.iter().any(|l| l == "└─ Child B"), "lines: {text:?}");
+        assert!(text.iter().any(|l| l == "▶ Root"), "lines: {text:?}");
+        assert!(text.iter().any(|l| l == "├─ ▶ Child A"), "lines: {text:?}");
+        assert!(text.iter().any(|l| l == "└─ ▶ Child B"), "lines: {text:?}");
     }
 
     #[test]
@@ -505,9 +514,9 @@ mod tests {
         assert_eq!(
             text,
             vec![
-                "Root".to_string(),
-                "└─ Child".to_string(),
-                "    └─ Grandchild".to_string()
+                "▶ Root".to_string(),
+                "└─ ▶ Child".to_string(),
+                "    └─ ▶ Grandchild".to_string()
             ],
             "lines: {text:?}"
         );
@@ -521,7 +530,7 @@ mod tests {
         g.connect_create(a, b).unwrap();
         let text = text_of(&render_tree(&g));
         assert!(
-            text.iter().any(|l| l == "Alpha ⇢ Beta"),
+            text.iter().any(|l| l == "▶ Alpha ⇢ Beta"),
             "lines: {text:?}"
         );
     }
@@ -550,15 +559,16 @@ mod tests {
         let (layout, total_w, total_h) = layout_boxes(&g);
         let r = |id| *layout.iter().find(|r| r.id == id).unwrap();
         // Root box is 4 + 4 = 8 wide; children A/B are 1 + 4 = 5 wide each.
-        assert_eq!((r(root).w, r(a).w, r(b).w), (8, 5, 5));
+        // Root "Root" is 4 + 2 (glyph) + 4 = 10 wide; A/B are 1 + 2 + 4 = 7.
+        assert_eq!((r(root).w, r(a).w, r(b).w), (10, 7, 7));
         // Children sit one LINK_H below the root box bottom.
         assert_eq!(r(a).y, r(root).y + r(root).h + LINK_H);
         assert_eq!(r(b).y, r(a).y);
-        // Group centered under the root center: root center 4, group 5+4+5=14 → starts at -3 → shifted to 0.
+        // Group centered under the root center: root center 5, group 7+4+7=18 → starts at -4 → shifted to 0.
         assert_eq!(r(a).x, 0);
-        assert_eq!(r(b).x, 9);
-        assert_eq!(r(root).x, 3);
-        assert_eq!(total_w, 14);
+        assert_eq!(r(b).x, 11);
+        assert_eq!(r(root).x, 4);
+        assert_eq!(total_w, 18);
         assert_eq!(total_h, r(b).y + r(b).h);
     }
 
@@ -608,29 +618,24 @@ mod tests {
         );
         let r = layout.iter().find(|r| r.id == root).unwrap();
         // Stem starts at the outer frame bottom and runs to the child frame.
+        // Root "R" is 1 + 2 (glyph) + 4 = 7 wide → stem at index 3.
         let stem_row = r.y + r.h;
-        assert_eq!(text[stem_row].chars().nth(2), Some('│'), "grid: {text:?}");
+        assert_eq!(text[stem_row].chars().nth(3), Some('│'), "grid: {text:?}");
     }
 
     #[test]
-    fn frame_style_is_brighter_variant_of_depth() {
+    fn kind_frame_differs_by_kind_and_theme() {
         use crate::highlight::Theme;
-        fn rgb(s: ratatui::style::Style) -> (u8, u8, u8) {
-            match s.bg {
-                Some(ratatui::style::Color::Rgb(r, g, b)) => (r, g, b),
-                other => panic!("expected rgb bg, got {other:?}"),
-            }
+        let action = kind_frame_style(NodeKind::Action, Theme::Dark);
+        let event = kind_frame_style(NodeKind::Event, Theme::Dark);
+        let light = kind_frame_style(NodeKind::Action, Theme::Light);
+        assert_ne!(action, event);
+        assert_ne!(action, light);
+        // All four kinds present.
+        for kind in [NodeKind::Action, NodeKind::View, NodeKind::Event, NodeKind::Query] {
+            let _ = kind_frame_style(kind, Theme::Dark);
+            let _ = kind_frame_style(kind, Theme::Light);
         }
-        // Dark theme: frame channels are lifted.
-        let (br, bg, bb) = rgb(depth_style(0, Theme::Dark));
-        let (fr, fg, fb) = rgb(frame_style(0, Theme::Dark));
-        assert!(fr >= br && fg >= bg && fb >= bb);
-        assert!((fr, fg, fb) != (br, bg, bb));
-        // Light theme: frame channels are deepened for contrast.
-        let (br, bg, bb) = rgb(depth_style(1, Theme::Light));
-        let (fr, fg, fb) = rgb(frame_style(1, Theme::Light));
-        assert!(fr <= br && fg <= bg && fb <= bb);
-        assert!((fr, fg, fb) != (br, bg, bb));
     }
 
     #[test]
@@ -642,7 +647,7 @@ mod tests {
         let grid = draw_canvas(&g, &layout, None, w, h, Theme::Dark);
         let r = layout.iter().find(|r| r.id == root).unwrap();
         // Outer corner = frame style, space glyph.
-        assert_eq!(grid[r.y][r.x], (' ', frame_style(0, Theme::Dark)));
+        assert_eq!(grid[r.y][r.x], (' ', kind_frame_style(NodeKind::Action, Theme::Dark)));
         // Title cell = depth background.
         assert_eq!(grid[r.y + 1][r.x + 1].1, depth_style(0, Theme::Dark));
     }
@@ -687,12 +692,20 @@ mod tests {
         let mut g = PlanGraph::new();
         let root = g.create_node("Root", None).unwrap();
         let child = g.create_node("Child", Some(root)).unwrap();
+        g.set_kind(child, NodeKind::Event).unwrap();
         let (layout, w, h) = layout_boxes(&g);
         let grid = draw_canvas(&g, &layout, None, w, h, Theme::Dark);
         let r = |id| *layout.iter().find(|r| r.id == id).unwrap();
-        // Outer corners = bright frame; title cells = depth background.
-        assert_eq!(grid[r(root).y][r(root).x].1, frame_style(0, Theme::Dark));
+        // Outer corners = category frame; title cells = depth background.
+        assert_eq!(
+            grid[r(root).y][r(root).x].1,
+            kind_frame_style(NodeKind::Action, Theme::Dark)
+        );
         assert_eq!(grid[r(root).y + 1][r(root).x + 1].1, depth_style(0, Theme::Dark));
+        assert_eq!(
+            grid[r(child).y][r(child).x].1,
+            kind_frame_style(NodeKind::Event, Theme::Dark)
+        );
         assert_eq!(grid[r(child).y + 1][r(child).x + 1].1, depth_style(1, Theme::Dark));
     }
 
@@ -705,12 +718,12 @@ mod tests {
         let r = layout.iter().find(|r| r.id == root).unwrap();
         let grid = draw_canvas(&g, &layout, Some(root), w, h, Theme::Dark);
         // Frame ring and content both carry REVERSED on top of their bg.
-        let frame = frame_style(0, Theme::Dark).add_modifier(Modifier::REVERSED);
+        let frame = kind_frame_style(NodeKind::Action, Theme::Dark).add_modifier(Modifier::REVERSED);
         let base = depth_style(0, Theme::Dark).add_modifier(Modifier::REVERSED);
         assert_eq!(grid[r.y][r.x].1, frame);
         assert_eq!(grid[r.y + 1][r.x + 1].1, base);
         let plain = draw_canvas(&g, &layout, None, w, h, Theme::Dark);
-        assert_eq!(plain[r.y][r.x].1, frame_style(0, Theme::Dark));
+        assert_eq!(plain[r.y][r.x].1, kind_frame_style(NodeKind::Action, Theme::Dark));
         assert_eq!(plain[r.y + 1][r.x + 1].1, depth_style(0, Theme::Dark));
     }
 

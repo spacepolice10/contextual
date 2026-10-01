@@ -91,9 +91,20 @@ fn handle_plan_command(
             println!("Nodes: {}", loaded.nodes.len());
             return Ok(());
         }
-        PlanSubcommand::NodeCreate { title, parent_id } => PlanCommand::NodeCreate {
+        PlanSubcommand::NodeCreate { title, parent_id, kind } => PlanCommand::NodeCreate {
             title: title.clone(),
             parent_id: *parent_id,
+            kind: match kind.as_deref() {
+                None => None,
+                Some(s) => Some(crate::plan::model::NodeKind::parse(s).ok_or_else(|| {
+                    anyhow::anyhow!("Invalid kind (action|view|event|query)")
+                })?),
+            },
+        },
+        PlanSubcommand::NodeSetKind { id, kind } => PlanCommand::NodeSetKind {
+            id: *id,
+            kind: crate::plan::model::NodeKind::parse(kind)
+                .ok_or_else(|| anyhow::anyhow!("Invalid kind (action|view|event|query)"))?,
         },
         PlanSubcommand::NodeUpdate { id, new_title } => PlanCommand::NodeUpdate {
             id: *id,
@@ -161,6 +172,7 @@ mod tests {
         let cmd = cli::PlanSubcommand::NodeCreate {
             title: "X".to_string(),
             parent_id: None,
+            kind: None,
         };
         let result = handle_plan_command(&cmd, Some(&path));
         assert!(result.is_err());
@@ -175,11 +187,16 @@ mod tests {
         let cmd = cli::PlanSubcommand::NodeCreate {
             title: "Fresh".to_string(),
             parent_id: None,
+            kind: Some("event".to_string()),
         };
         handle_plan_command(&cmd, Some(&path)).unwrap();
         let loaded = crate::plan::model::PlanGraph::load(&path).unwrap();
         assert_eq!(loaded.nodes.len(), 1);
         assert_eq!(loaded.nodes[0].title, "Fresh");
+        assert_eq!(
+            loaded.nodes[0].kind,
+            crate::plan::model::NodeKind::Event
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

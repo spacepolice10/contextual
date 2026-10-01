@@ -52,8 +52,9 @@ pub fn mcp_tools() -> Vec<McpTool> {
     vec![
         tool("plan_create", "Create a new empty plan file", &["path"]),
         tool("plan_open", "Open an existing plan file", &["path"]),
-        tool("node_create", "Create a node, optionally as a child", &["title", "parent_id"]),
+        tool("node_create", "Create a node, optionally as a child", &["title", "parent_id", "kind"]),
         tool("node_update", "Rename a node", &["id", "new_title"]),
+        tool("node_set_kind", "Set a node's category (action|view|event|query)", &["id", "kind"]),
         tool("node_delete", "Delete a node and its subtree", &["id"]),
         tool("node_list", "List all nodes", &[]),
         tool("node_show", "Show node details", &["id"]),
@@ -96,6 +97,30 @@ pub fn handle_mcp_tool_with_graph(
         "node_create" => PlanCommand::NodeCreate {
             title: str_arg(&args, "title")?,
             parent_id: opt_u64_arg(&args, "parent_id")?,
+            kind: match args.get("kind") {
+                None | Some(serde_json::Value::Null) => None,
+                Some(v) => Some(
+                    v.as_str()
+                        .and_then(crate::plan::model::NodeKind::parse)
+                        .ok_or_else(|| {
+                            PlanError::InvalidArgs(
+                                "arg `kind` must be action|view|event|query".to_string(),
+                            )
+                        })?,
+                ),
+            },
+        },
+        "node_set_kind" => PlanCommand::NodeSetKind {
+            id: u64_arg(&args, "id")?,
+            kind: args
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .and_then(crate::plan::model::NodeKind::parse)
+                .ok_or_else(|| {
+                    PlanError::InvalidArgs(
+                        "arg `kind` must be action|view|event|query".to_string(),
+                    )
+                })?,
         },
         "node_update" => PlanCommand::NodeUpdate {
             id: u64_arg(&args, "id")?,
@@ -142,6 +167,7 @@ mod tests {
             "plan_open",
             "node_create",
             "node_update",
+            "node_set_kind",
             "node_delete",
             "node_list",
             "node_show",
@@ -152,7 +178,7 @@ mod tests {
         ] {
             assert!(names.contains(&expected), "missing tool: {expected}");
         }
-        assert_eq!(tools.len(), 11);
+        assert_eq!(tools.len(), 12);
     }
 
     #[test]

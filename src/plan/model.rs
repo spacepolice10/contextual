@@ -1,11 +1,62 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NodeKind {
+    Action,
+    View,
+    Event,
+    Query,
+}
+
+impl NodeKind {
+    /// Glyph drawn before the title in boxes and outline rows.
+    pub fn glyph(self) -> char {
+        match self {
+            NodeKind::Action => '▶',
+            NodeKind::View => '■',
+            NodeKind::Event => '●',
+            NodeKind::Query => '◆',
+        }
+    }
+
+    /// Case-insensitive parse for CLI/MCP input.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_ascii_lowercase().as_str() {
+            "action" => Some(NodeKind::Action),
+            "view" => Some(NodeKind::View),
+            "event" => Some(NodeKind::Event),
+            "query" => Some(NodeKind::Query),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for NodeKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            NodeKind::Action => "action",
+            NodeKind::View => "view",
+            NodeKind::Event => "event",
+            NodeKind::Query => "query",
+        };
+        write!(f, "{s}")
+    }
+}
+
+fn default_kind() -> NodeKind {
+    NodeKind::Action
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanNode {
     pub id: u64,
     pub title: String,
     pub parent: Option<u64>,
+    /// Event-modeling category; missing in old files means [`NodeKind::Action`].
+    #[serde(default = "default_kind")]
+    pub kind: NodeKind,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,8 +124,20 @@ impl PlanGraph {
             id,
             title: title.to_string(),
             parent,
+            kind: NodeKind::Action,
         });
         Ok(id)
+    }
+
+    /// Change a node's event-modeling category.
+    pub fn set_kind(&mut self, id: u64, kind: NodeKind) -> Result<(), PlanError> {
+        let node = self
+            .nodes
+            .iter_mut()
+            .find(|n| n.id == id)
+            .ok_or(PlanError::NodeNotFound(id))?;
+        node.kind = kind;
+        Ok(())
     }
 
     pub fn update_node(&mut self, id: u64, new_title: &str) -> Result<(), PlanError> {
@@ -368,6 +431,53 @@ mod tests {
         assert_eq!(loaded.nodes.len(), 1);
         assert_eq!(loaded.nodes[0].title, "Auto");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn node_kind_parse_display_glyph() {
+        assert_eq!(NodeKind::parse("event"), Some(NodeKind::Event));
+        assert_eq!(NodeKind::parse("VIEW"), Some(NodeKind::View));
+        assert_eq!(NodeKind::parse("Query"), Some(NodeKind::Query));
+        assert_eq!(NodeKind::parse("action"), Some(NodeKind::Action));
+        assert_eq!(NodeKind::parse("nope"), None);
+        assert_eq!(NodeKind::Event.to_string(), "event");
+        assert_eq!(NodeKind::Action.glyph(), '▶');
+        assert_eq!(NodeKind::View.glyph(), '■');
+        assert_eq!(NodeKind::Event.glyph(), '●');
+        assert_eq!(NodeKind::Query.glyph(), '◆');
+    }
+
+    #[test]
+    fn create_node_defaults_to_action() {
+        let mut g = PlanGraph::new();
+        let id = g.create_node("T", None).unwrap();
+        assert_eq!(g.show_node(id).unwrap().kind, NodeKind::Action);
+    }
+
+    #[test]
+    fn set_kind_changes_category() {
+        let mut g = PlanGraph::new();
+        let id = g.create_node("T", None).unwrap();
+        g.set_kind(id, NodeKind::Event).unwrap();
+        assert_eq!(g.show_node(id).unwrap().kind, NodeKind::Event);
+        assert!(matches!(
+            g.set_kind(999, NodeKind::View),
+            Err(PlanError::NodeNotFound(999))
+        ));
+    }
+
+    #[test]
+    fn load_old_json_without_kind_defaults_to_action() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("ctx_plan_old_format.json");
+        std::fs::write(
+            &path,
+            r#"{"nodes":[{"id":1,"title":"Root","parent":null}],"cross_links":[],"next_id":2}"#,
+        )
+        .unwrap();
+        let loaded = PlanGraph::load(&path).unwrap();
+        assert_eq!(loaded.nodes[0].kind, NodeKind::Action);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

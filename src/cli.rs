@@ -37,6 +37,15 @@ pub enum PlanSubcommand {
         title: String,
         /// Optional parent node ID
         parent_id: Option<u64>,
+        /// Optional category: action|view|event|query (default: action)
+        kind: Option<String>,
+    },
+    /// Set a node's event-modeling category
+    NodeSetKind {
+        /// Node ID
+        id: u64,
+        /// Category: action|view|event|query
+        kind: String,
     },
     /// Update a node's title
     NodeUpdate {
@@ -120,6 +129,25 @@ mod tests {
     fn cli_node_create_with_parent_parses() {
         let cli = Cli::parse_from(["contextual", "node_create", "Hello", "1"]);
         assert!(cli.plan.is_some());
+    }
+
+    #[test]
+    fn cli_node_create_with_kind_parses() {
+        let cli = Cli::parse_from(["contextual", "node_create", "Hello", "1", "event"]);
+        assert!(matches!(
+            cli.plan,
+            Some(PlanSubcommand::NodeCreate { parent_id: Some(1), ref kind, .. })
+            if kind.as_deref() == Some("event")
+        ));
+    }
+
+    #[test]
+    fn cli_node_set_kind_parses() {
+        let cli = Cli::parse_from(["contextual", "node_set_kind", "2", "view"]);
+        assert!(matches!(
+            cli.plan,
+            Some(PlanSubcommand::NodeSetKind { id: 2, .. })
+        ));
     }
 
     #[test]

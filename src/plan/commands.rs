@@ -1,4 +1,4 @@
-use crate::plan::model::{PlanError, PlanGraph};
+use crate::plan::model::{NodeKind, PlanError, PlanGraph};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
@@ -9,8 +9,9 @@ pub enum PlanCommand {
     PlanCreate { path: PathBuf },
     #[allow(dead_code)]
     PlanOpen { path: PathBuf },
-    NodeCreate { title: String, parent_id: Option<u64> },
+    NodeCreate { title: String, parent_id: Option<u64>, kind: Option<NodeKind> },
     NodeUpdate { id: u64, new_title: String },
+    NodeSetKind { id: u64, kind: NodeKind },
     NodeDelete { id: u64 },
     NodeList,
     NodeShow { id: u64 },
@@ -53,7 +54,12 @@ pub fn parse_command(input: &str) -> Result<PlanCommand, String> {
             } else {
                 None
             };
-            Ok(PlanCommand::NodeCreate { title, parent_id })
+            let kind = if parts.len() > 3 {
+                Some(NodeKind::parse(parts[3]).ok_or("Invalid kind (action|view|event|query)")?)
+            } else {
+                None
+            };
+            Ok(PlanCommand::NodeCreate { title, parent_id, kind })
         }
         "node_update" => {
             if parts.len() < 3 {
@@ -69,6 +75,15 @@ pub fn parse_command(input: &str) -> Result<PlanCommand, String> {
             }
             let id = parts[1].parse::<u64>().map_err(|_| "Invalid id")?;
             Ok(PlanCommand::NodeDelete { id })
+        }
+        "node_set_kind" => {
+            if parts.len() < 3 {
+                return Err("node_set_kind requires <id> <kind>".to_string());
+            }
+            let id = parts[1].parse::<u64>().map_err(|_| "Invalid id")?;
+            let kind =
+                NodeKind::parse(parts[2]).ok_or("Invalid kind (action|view|event|query)")?;
+            Ok(PlanCommand::NodeSetKind { id, kind })
         }
         "node_list" => Ok(PlanCommand::NodeList),
         "node_show" => {
@@ -122,6 +137,7 @@ pub fn is_mutation(cmd: &PlanCommand) -> bool {
         cmd,
         PlanCommand::NodeCreate { .. }
             | PlanCommand::NodeUpdate { .. }
+            | PlanCommand::NodeSetKind { .. }
             | PlanCommand::NodeDelete { .. }
             | PlanCommand::LinkCreate { .. }
             | PlanCommand::LinkRemove { .. }
@@ -141,13 +157,21 @@ pub fn execute_command(graph: &mut PlanGraph, cmd: &PlanCommand) -> Result<Strin
             *graph = loaded;
             Ok(format!("Opened plan: {}", path.display()))
         }
-        PlanCommand::NodeCreate { title, parent_id } => {
+        PlanCommand::NodeCreate { title, parent_id, kind } => {
             let id = graph.create_node(title, *parent_id)?;
-            Ok(format!("Created node {}: {}", id, title))
+            if let Some(kind) = kind {
+                graph.set_kind(id, *kind)?;
+            }
+            let node = graph.show_node(id)?;
+            Ok(format!("Created node {}: {} [{}]", id, title, node.kind))
         }
         PlanCommand::NodeUpdate { id, new_title } => {
             graph.update_node(*id, new_title)?;
             Ok(format!("Updated node {}: {}", id, new_title))
+        }
+        PlanCommand::NodeSetKind { id, kind } => {
+            graph.set_kind(*id, *kind)?;
+            Ok(format!("Node {} kind: {}", id, kind))
         }
         PlanCommand::NodeDelete { id } => {
             graph.delete_node(*id)?;
@@ -169,7 +193,7 @@ pub fn execute_command(graph: &mut PlanGraph, cmd: &PlanCommand) -> Result<Strin
                 Some(p) => format!("parent: {}", p),
                 None => "root".to_string(),
             };
-            Ok(format!("id: {}\ntitle: {}\n{}", node.id, node.title, parent_str))
+            Ok(format!("id: {}\ntitle: {}\nkind: {}\n{}", node.id, node.title, node.kind, parent_str))
         }
         PlanCommand::LinkCreate { parent_id, child_id } => {
             graph.link_create(*parent_id, *child_id)?;
@@ -203,13 +227,31 @@ mod tests {
     #[test]
     fn parse_node_create_no_parent() {
         let cmd = parse_command("node_create Hello").unwrap();
-        assert!(matches!(cmd, PlanCommand::NodeCreate { title, parent_id: None } if title == "Hello"));
+        assert!(matches!(cmd, PlanCommand::NodeCreate { title, parent_id: None, kind: None } if title == "Hello"));
     }
 
     #[test]
     fn parse_node_create_with_parent() {
         let cmd = parse_command("node_create Hello 1").unwrap();
-        assert!(matches!(cmd, PlanCommand::NodeCreate { title, parent_id: Some(1) } if title == "Hello"));
+        assert!(matches!(cmd, PlanCommand::NodeCreate { title, parent_id: Some(1), kind: None } if title == "Hello"));
+    }
+
+    #[test]
+    fn parse_node_create_with_kind() {
+        let cmd = parse_command("node_create Hello 1 event").unwrap();
+        assert!(matches!(
+            cmd,
+            PlanCommand::NodeCreate { title, parent_id: Some(1), kind: Some(NodeKind::Event) } if title == "Hello"
+        ));
+        assert!(parse_command("node_create Hello 1 bogus").is_err());
+    }
+
+    #[test]
+    fn parse_node_set_kind() {
+        let cmd = parse_command("node_set_kind 2 VIEW").unwrap();
+        assert!(matches!(cmd, PlanCommand::NodeSetKind { id: 2, kind: NodeKind::View }));
+        assert!(parse_command("node_set_kind 2 bogus").is_err());
+        assert!(parse_command("node_set_kind").is_err());
     }
 
     #[test]
@@ -276,9 +318,10 @@ mod tests {
     #[test]
     fn execute_node_create_returns_id() {
         let mut g = PlanGraph::new();
-        let cmd = PlanCommand::NodeCreate { title: "Test".to_string(), parent_id: None };
+        let cmd = PlanCommand::NodeCreate { title: "Test".to_string(), parent_id: None, kind: Some(NodeKind::Query) };
         let result = execute_command(&mut g, &cmd).unwrap();
         assert!(result.contains("1"));
+        assert_eq!(g.show_node(1).unwrap().kind, NodeKind::Query);
     }
 
     #[test]
@@ -293,6 +336,16 @@ mod tests {
     }
 
     #[test]
+    fn execute_node_set_kind() {
+        let mut g = PlanGraph::new();
+        let id = g.create_node("T", None).unwrap();
+        let cmd = PlanCommand::NodeSetKind { id, kind: NodeKind::View };
+        let result = execute_command(&mut g, &cmd).unwrap();
+        assert!(result.contains("view"));
+        assert_eq!(g.show_node(id).unwrap().kind, NodeKind::View);
+    }
+
+    #[test]
     fn execute_node_show_displays_details() {
         let mut g = PlanGraph::new();
         let id = g.create_node("MyNode", None).unwrap();
@@ -300,6 +353,7 @@ mod tests {
         let result = execute_command(&mut g, &cmd).unwrap();
         assert!(result.contains("MyNode"));
         assert!(result.contains("id: 1"));
+        assert!(result.contains("kind: action"));
     }
 
     #[test]
@@ -318,7 +372,12 @@ mod tests {
         // Every graph mutation persists.
         assert!(is_mutation(&PlanCommand::NodeCreate {
             title: "t".to_string(),
-            parent_id: None
+            parent_id: None,
+            kind: None
+        }));
+        assert!(is_mutation(&PlanCommand::NodeSetKind {
+            id: 1,
+            kind: NodeKind::Event
         }));
         assert!(is_mutation(&PlanCommand::NodeUpdate {
             id: 1,
