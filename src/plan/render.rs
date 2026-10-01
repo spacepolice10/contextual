@@ -1,6 +1,7 @@
+use crate::highlight::Theme;
 use crate::plan::model::PlanGraph;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
 // ---------------------------------------------------------------------------
@@ -204,6 +205,47 @@ fn set(grid: &mut [Vec<Cell>], x: usize, y: usize, ch: char, style: Style) {
     }
 }
 
+/// Depth-tinted backgrounds, cycling through a small palette.
+/// Dark themes get dark slate tones, light themes pastels; the default
+/// foreground is untouched so text stays readable on both.
+const DARK_BG: &[Color] = &[
+    Color::Rgb(38, 40, 64),
+    Color::Rgb(30, 48, 66),
+    Color::Rgb(52, 36, 66),
+    Color::Rgb(30, 54, 54),
+];
+const LIGHT_BG: &[Color] = &[
+    Color::Rgb(232, 234, 246),
+    Color::Rgb(226, 238, 244),
+    Color::Rgb(240, 230, 246),
+    Color::Rgb(230, 244, 238),
+];
+
+pub fn depth_style(depth: usize, theme: Theme) -> Style {
+    let palette = match theme {
+        Theme::Dark => DARK_BG,
+        Theme::Light => LIGHT_BG,
+    };
+    Style::default().bg(palette[depth % palette.len()])
+}
+
+/// Depth of a node (roots are 0), walking parent pointers.
+/// Bounded by the node count so hand-edited cyclic data terminates.
+fn node_depth(graph: &PlanGraph, id: u64) -> usize {
+    let mut depth = 0;
+    let mut cur = id;
+    for _ in 0..graph.nodes.len() + 1 {
+        match graph.nodes.iter().find(|n| n.id == cur).and_then(|n| n.parent) {
+            Some(parent) => {
+                depth += 1;
+                cur = parent;
+            }
+            None => break,
+        }
+    }
+    depth
+}
+
 /// Draw boxes, ports and elbow connectors onto a char grid.
 pub fn draw_canvas(
     graph: &PlanGraph,
@@ -211,6 +253,7 @@ pub fn draw_canvas(
     selected: Option<u64>,
     total_w: usize,
     total_h: usize,
+    theme: Theme,
 ) -> Vec<Vec<Cell>> {
     let mut grid = vec![vec![(' ', Style::default()); total_w]; total_h];
     // Connectors first, boxes paint over junctions.
@@ -245,8 +288,17 @@ pub fn draw_canvas(
         for x in min_cx..=max_cx {
             set(&mut grid, x, bus, '─', Style::default());
         }
+        // Rounded ends at the outer drops; the parent stem junction keeps
+        // its ┼/┴ shape (a 3-way joint has no rounded form).
         for cx in &centers {
-            set(&mut grid, *cx, bus, '┬', Style::default());
+            let ch = if *cx == min_cx {
+                '╭'
+            } else if *cx == max_cx {
+                '╮'
+            } else {
+                '┬'
+            };
+            set(&mut grid, *cx, bus, ch, Style::default());
         }
         if centers.contains(&cx_p) {
             set(&mut grid, cx_p, bus, '┼', Style::default());
@@ -258,17 +310,18 @@ pub fn draw_canvas(
         }
     }
     // Boxes with rounded corners, centered ports, optional cross-link row.
+    // Every cell of a box carries its depth background; the focused box
+    // additionally gets REVERSED.
     for r in layout {
         let node = graph
             .nodes
             .iter()
             .find(|n| n.id == r.id)
             .expect("node for known rect");
-        let style = if selected == Some(r.id) {
-            Style::default().add_modifier(Modifier::REVERSED)
-        } else {
-            Style::default()
-        };
+        let mut style = depth_style(node_depth(graph, r.id), theme);
+        if selected == Some(r.id) {
+            style = style.add_modifier(Modifier::REVERSED);
+        }
         let cx = r.x + r.w / 2 - r.x; // center offset inside the box
         for (i, y) in (r.y..r.y + r.h).enumerate() {
             match i {
@@ -369,7 +422,12 @@ pub fn canvas_view(
 // Screen: Flow (boxes) left, tree Outline right.
 // ---------------------------------------------------------------------------
 
-pub fn render_plan(f: &mut ratatui::Frame, pm: &mut crate::plan::PlanMode, area: Rect) {
+pub fn render_plan(
+    f: &mut ratatui::Frame,
+    pm: &mut crate::plan::PlanMode,
+    area: Rect,
+    theme: Theme,
+) {
     use ratatui::layout::{Constraint, Direction, Layout};
     use ratatui::widgets::{Block, Borders, Paragraph};
 
@@ -385,7 +443,7 @@ pub fn render_plan(f: &mut ratatui::Frame, pm: &mut crate::plan::PlanMode, area:
         pm.flow_view_h = c.height.saturating_sub(2) as usize;
         let (layout, total_w, total_h) = layout_boxes(&pm.graph);
         pm.follow_flow(&layout, total_w, total_h);
-        let grid = draw_canvas(&pm.graph, &layout, pm.selected_node, total_w, total_h);
+        let grid = draw_canvas(&pm.graph, &layout, pm.selected_node, total_w, total_h, theme);
         let lines = canvas_view(&grid, pm.flow_view_w, pm.flow_view_h, pm.flow_row, pm.flow_col);
         let widget =
             Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("Flow Chart"));
@@ -538,7 +596,7 @@ mod tests {
         let root = g.create_node("R", None).unwrap();
         g.create_node("C", Some(root)).unwrap();
         let (layout, w, h) = layout_boxes(&g);
-        let grid = draw_canvas(&g, &layout, None, w, h);
+        let grid = draw_canvas(&g, &layout, None, w, h, crate::highlight::Theme::Dark);
         let text = grid_text(&grid);
         // Root box: ╭─┬─╮ / │ R │ / ╰─┴─╯ ; straight │ stem; child box below.
         assert!(text[0].contains("╭─┬─╮"), "grid: {text:?}");
@@ -549,40 +607,70 @@ mod tests {
     }
 
     #[test]
-    fn draw_sibling_bus_has_elbows() {
+    fn draw_sibling_bus_has_rounded_ends() {
         let mut g = PlanGraph::new();
         let root = g.create_node("Root", None).unwrap();
         g.create_node("A", Some(root)).unwrap();
         g.create_node("B", Some(root)).unwrap();
         let (layout, w, h) = layout_boxes(&g);
-        let grid = draw_canvas(&g, &layout, None, w, h);
+        let grid = draw_canvas(&g, &layout, None, w, h, crate::highlight::Theme::Dark);
         let text = grid_text(&grid);
+        // Bus row: rounded ends at the outer drops, ┴ where the parent
+        // stem (centered between the children) meets the bus.
+        // (Box borders also contain ╭…╮, so pin the bus by its ┴ junction.)
         let bus = text
             .iter()
-            .find(|l| l.contains('┬') || l.contains('┼'))
+            .find(|l| l.contains('┴') && !l.contains('╰'))
             .cloned()
-            .expect("bus row");
+            .expect("rounded bus row");
+        assert!(bus.contains('╭'), "bus: {bus}");
+        assert!(bus.contains('╮'), "bus: {bus}");
         assert!(bus.contains('─'), "bus: {bus}");
     }
 
     #[test]
+    fn depth_style_differs_by_depth_and_theme() {
+        use crate::highlight::Theme;
+        let d0 = depth_style(0, Theme::Dark);
+        let d1 = depth_style(1, Theme::Dark);
+        let l0 = depth_style(0, Theme::Light);
+        assert_ne!(d0, d1);
+        assert_ne!(d0, l0);
+        // Cycles back through the palette instead of growing forever.
+        assert_eq!(depth_style(0, Theme::Dark), depth_style(4, Theme::Dark));
+    }
+
+    #[test]
+    fn draw_box_has_depth_background() {
+        use crate::highlight::Theme;
+        let mut g = PlanGraph::new();
+        let root = g.create_node("Root", None).unwrap();
+        let child = g.create_node("Child", Some(root)).unwrap();
+        let (layout, w, h) = layout_boxes(&g);
+        let grid = draw_canvas(&g, &layout, None, w, h, Theme::Dark);
+        let r = |id| *layout.iter().find(|r| r.id == id).unwrap();
+        let root_bg = depth_style(0, Theme::Dark);
+        let child_bg = depth_style(1, Theme::Dark);
+        // Top-left corner cells carry their depth background.
+        assert_eq!(grid[r(root).y][r(root).x].1, root_bg);
+        assert_eq!(grid[r(child).y][r(child).x].1, child_bg);
+    }
+
+    #[test]
     fn draw_selected_box_is_reversed() {
+        use crate::highlight::Theme;
         let mut g = PlanGraph::new();
         let root = g.create_node("R", None).unwrap();
         let (layout, w, h) = layout_boxes(&g);
-        let grid = draw_canvas(&g, &layout, Some(root), w, h);
+        let selected_style = depth_style(0, Theme::Dark).add_modifier(Modifier::REVERSED);
+        let grid = draw_canvas(&g, &layout, Some(root), w, h, Theme::Dark);
         assert!(
-            grid.iter().flatten().all(|(_, st)| st
-                == &Style::default().add_modifier(Modifier::REVERSED)),
-            "every cell of the single box must be reversed"
+            grid.iter().flatten().all(|(_, st)| st == &selected_style),
+            "every cell of the single box must carry depth bg + reversed"
         );
-        let plain = draw_canvas(&g, &layout, None, w, h);
-        assert!(
-            plain
-                .iter()
-                .flatten()
-                .all(|(_, st)| *st == Style::default())
-        );
+        let plain = draw_canvas(&g, &layout, None, w, h, Theme::Dark);
+        let base = depth_style(0, Theme::Dark);
+        assert!(plain.iter().flatten().all(|(_, st)| *st == base));
     }
 
     #[test]

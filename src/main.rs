@@ -136,7 +136,7 @@ fn render(f: &mut ratatui::Frame, app: &mut app::App) {
         Mode::Viewer => crate::ui::viewer::render_viewer(f, app, area),
         Mode::Plan => {
             if let Some(pm) = &mut app.plan {
-                crate::plan::render_plan(f, pm, area);
+                crate::plan::render_plan(f, pm, area, app.theme);
             }
         }
     }
