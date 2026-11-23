@@ -31,7 +31,7 @@ export const starterDiagrams = [
   },
 ]
 
-export const contextualDevelopmentDiagram = {
+export const contextualDevelopmentDiagramV2 = {
   title: "Разработка Contextual",
   source: `flowchart LR
   product["Contextual<br/>Рабочее пространство для контент-креаторов"]
@@ -62,4 +62,17 @@ export const contextualDevelopmentDiagram = {
   class product,foundation,library,viewer,navigation,interaction goal
   class desktop,seeded,preview,verified done
   class selection,planned future`,
+}
+
+export const contextualDevelopmentDiagram = {
+  title: contextualDevelopmentDiagramV2.title,
+  source: `${contextualDevelopmentDiagramV2.source}
+
+  desktop --> buildEvidence["Подтверждение<br/>Сборка Linux: npm run build<br/>Коммит afe05f7"]
+  seeded --> storageEvidence["Подтверждение<br/>Миграция v1 → v2 добавила одну схему<br/>Повторный запуск не создал дубль<br/>Коммит 4c6b843"]
+  preview --> renderEvidence["Подтверждение<br/>Pele отрисовал 20 узлов<br/>Скриншот из Linux-сборки"]
+  verified --> routeEvidence["Подтверждение<br/>/diagrams/2 открылась напрямую<br/>Перезагрузка сохранила адрес<br/>Коммит aeb17c9"]
+
+  classDef evidence fill:#e6edf3,stroke:#657986,color:#293b49
+  class buildEvidence,storageEvidence,renderEvidence,routeEvidence evidence`,
 }

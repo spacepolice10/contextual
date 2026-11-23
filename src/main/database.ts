@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs"
 import { dirname } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import type { Diagram } from "../diagrams"
-import { contextualDevelopmentDiagram, starterDiagrams } from "./seed"
+import { contextualDevelopmentDiagram, contextualDevelopmentDiagramV2, starterDiagrams } from "./seed"
 
 export function listDiagrams(path: string): Diagram[] {
   mkdirSync(dirname(path), { recursive: true })
@@ -10,7 +10,7 @@ export function listDiagrams(path: string): Diagram[] {
 
   try {
     const schemaVersion = db.prepare("PRAGMA user_version")
-    if (Number(schemaVersion.get()?.user_version) < 2) {
+    if (Number(schemaVersion.get()?.user_version) < 3) {
       db.exec("BEGIN IMMEDIATE")
       // Another instance may have migrated the file while this one acquired the lock.
       const version = Number(schemaVersion.get()?.user_version)
@@ -28,8 +28,12 @@ export function listDiagrams(path: string): Diagram[] {
       if (version < 2) {
         const { title, source } = contextualDevelopmentDiagram
         db.prepare("INSERT INTO diagrams (title, source) VALUES (?, ?)").run(title, source)
-        db.exec("PRAGMA user_version = 2")
+      } else if (version === 2) {
+        const { title, source } = contextualDevelopmentDiagramV2
+        db.prepare("UPDATE diagrams SET source = ? WHERE title = ? AND source = ?")
+          .run(contextualDevelopmentDiagram.source, title, source)
       }
+      if (version < 3) db.exec("PRAGMA user_version = 3")
       db.exec("COMMIT")
     }
 
