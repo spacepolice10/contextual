@@ -4,13 +4,28 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": "^22.13.0 || >=24.0.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "build": "electron-forge package",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "electron-forge start",
+    "make": "electron-forge make"
   },
   "devDependencies": {
-    "typescript": "5.9.3"
+    "@electron-forge/cli": "8.0.1",
+    "@electron-forge/maker-zip": "8.0.1",
+    "@electron-forge/plugin-vite": "8.0.1",
+    "@types/node": "24.19.2",
+    "electron": "45.4.1",
+    "typescript": "5.9.3",
+    "vite": "8.3.8"
+  },
+  "description": "Local Mermaid diagram viewer",
+  "main": ".vite/build/index.cjs",
+  "dependencies": {
+    "nanostores": "1.5.5",
+    "nanotags": "0.17.0",
+    "pele": "1.13.0"
   }
 }

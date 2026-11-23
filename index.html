@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'none'">
+    <title>Contextual</title>
+  </head>
+  <body>
+    <contextual-library>
+      <aside class="sidebar">
+        <header class="wordmark">Contextual</header>
+        <nav aria-labelledby="library-label">
+          <h2 id="library-label">Diagrams</h2>
+          <ul class="diagram-list" data-ref="list"></ul>
+        </nav>
+        <template data-ref="item">
+          <li><button class="diagram-button" type="button" data-diagram-id></button></li>
+        </template>
+      </aside>
+      <main class="workspace">
+        <header class="workspace-header">
+          <h1 data-ref="title">Diagram library</h1>
+        </header>
+        <section class="canvas" aria-label="Diagram preview" data-ref="canvas" aria-busy="true">
+          <p class="message" role="status" data-ref="message">Loading diagrams…</p>
+          <div class="diagram" data-ref="diagram" hidden></div>
+        </section>
+      </main>
+    </contextual-library>
+    <script type="module" async src="/src/renderer/index.ts"></script>
+  </body>
+</html>
