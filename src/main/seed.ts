@@ -30,3 +30,36 @@ export const starterDiagrams = [
   Published --> [*]`,
   },
 ]
+
+export const contextualDevelopmentDiagram = {
+  title: "Разработка Contextual",
+  source: `flowchart LR
+  product["Contextual<br/>Рабочее пространство для контент-креаторов"]
+
+  product --> foundation["Цель<br/>Перезапустить проект"]
+  foundation --> bootstrap["Задачи<br/>Создать ветку для TypeScript<br/>Настроить Electron Forge и Vite"]
+  bootstrap --> desktop["Готово<br/>Приложение запускается в dev-режиме<br/>Linux-сборка проверена"]
+
+  product --> library["Цель<br/>Открывать локальную библиотеку схем"]
+  library --> storage["Задачи<br/>Хранить исходники Mermaid в SQLite<br/>Заполнить базу примерами"]
+  storage --> seeded["Готово<br/>Примеры появляются при первом запуске<br/>Данные сохраняются между запусками"]
+
+  product --> viewer["Цель<br/>Просматривать схемы"]
+  viewer --> rendering["Задачи<br/>Рендерить Mermaid через Pele<br/>Связать интерфейс с Nano Stores и nanotags"]
+  rendering --> preview["Готово<br/>Просмотр схем и обработка ошибок рендера"]
+
+  product --> navigation["Цель<br/>Открывать каждую схему по адресу"]
+  navigation --> routing["Задачи<br/>Подключить Nano Stores Router<br/>Добавить /diagrams/:id и протокол app://"]
+  routing --> verified["Готово<br/>Прямое открытие, перезагрузка<br/>и переходы назад и вперёд проверены"]
+
+  product --> interaction["Цель<br/>Работать с вариантами контента на схеме"]
+  interaction --> selection["Обсудили<br/>Выбор узла и действия для выбранного узла"]
+  selection -.-> planned["Дальше<br/>Связать действия с агентом<br/>Добавить ветки и версии контента"]
+
+  classDef goal fill:#eee4d7,stroke:#846c53,color:#30271f
+  classDef done fill:#e5eee4,stroke:#667b63,color:#2c3b29
+  classDef future fill:#f1e8e2,stroke:#96705d,color:#4c3023
+  class product,foundation,library,viewer,navigation,interaction goal
+  class desktop,seeded,preview,verified done
+  class selection,planned future`,
+}

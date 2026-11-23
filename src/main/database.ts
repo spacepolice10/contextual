@@ -2,18 +2,19 @@ import { mkdirSync } from "node:fs"
 import { dirname } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import type { Diagram } from "../diagrams"
-import { starterDiagrams } from "./seed"
+import { contextualDevelopmentDiagram, starterDiagrams } from "./seed"
 
 export function listDiagrams(path: string): Diagram[] {
   mkdirSync(dirname(path), { recursive: true })
   const db = new DatabaseSync(path)
 
   try {
-    const version = db.prepare("PRAGMA user_version").get()?.user_version
-    if (version === 0) {
+    const schemaVersion = db.prepare("PRAGMA user_version")
+    if (Number(schemaVersion.get()?.user_version) < 2) {
       db.exec("BEGIN IMMEDIATE")
-      // Another instance may have initialized the file while this one acquired the lock.
-      if (db.prepare("PRAGMA user_version").get()?.user_version === 0) {
+      // Another instance may have migrated the file while this one acquired the lock.
+      const version = Number(schemaVersion.get()?.user_version)
+      if (version === 0) {
         db.exec(`
           CREATE TABLE diagrams (
             id INTEGER PRIMARY KEY,
@@ -23,7 +24,11 @@ export function listDiagrams(path: string): Diagram[] {
         `)
         const insert = db.prepare("INSERT INTO diagrams (title, source) VALUES (?, ?)")
         for (const { title, source } of starterDiagrams) insert.run(title, source)
-        db.exec("PRAGMA user_version = 1")
+      }
+      if (version < 2) {
+        const { title, source } = contextualDevelopmentDiagram
+        db.prepare("INSERT INTO diagrams (title, source) VALUES (?, ?)").run(title, source)
+        db.exec("PRAGMA user_version = 2")
       }
       db.exec("COMMIT")
     }
