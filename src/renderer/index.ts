@@ -1,8 +1,10 @@
+import { getPagePath, redirectPage } from "@nanostores/router"
 import { atom, computed } from "nanostores"
 import { define } from "nanotags"
 import { renderList } from "nanotags/render"
 import { mount } from "pele"
 import type { Diagram, DiagramLibrary } from "../diagrams"
+import { $router } from "./router"
 import "./styles.css"
 
 declare global {
@@ -17,7 +19,7 @@ declare global {
 
 type LibraryState =
   | { status: "loading" }
-  | { status: "ready"; diagrams: Diagram[]; selectedId: number | undefined }
+  | { status: "ready"; diagrams: Diagram[] }
   | { status: "error" }
 
 const ContextualLibrary = define("contextual-library")
@@ -32,54 +34,52 @@ const ContextualLibrary = define("contextual-library")
   .setup((ctx) => {
     const { list, item, title, canvas, message, diagram } = ctx.refs
     const $library = atom<LibraryState>({ status: "loading" })
-    const $selected = computed($library, (state) => {
-      if (state.status === "ready") return state.diagrams.find(({ id }) => id === state.selectedId)
+    const $selected = computed([$library, $router], (state, page) => {
+      if (state.status === "ready" && page?.route === "diagram") {
+        return state.diagrams.find(({ id }) => String(id) === page.params.id)
+      }
     })
 
     async function loadLibrary(signal: AbortSignal) {
       try {
         const diagrams = await window.diagrams.list()
-        if (!signal.aborted) {
-          $library.set({ status: "ready", diagrams, selectedId: diagrams[0]?.id })
+        if (signal.aborted) return
+
+        const first = diagrams[0]
+        if (first && $router.get()?.route === "library") {
+          redirectPage($router, "diagram", { id: String(first.id) })
         }
+        $library.set({ status: "ready", diagrams })
       } catch (error) {
         console.error(error)
         if (!signal.aborted) $library.set({ status: "error" })
       }
     }
 
-    ctx.on(list, "click", (event) => {
-      if (!(event.target instanceof Element)) return
-      const button = event.target.closest<HTMLButtonElement>("button[data-diagram-id]")
-      const state = $library.get()
-      const id = Number(button?.dataset.diagramId)
-      if (state.status === "ready" && state.diagrams.some((diagram) => diagram.id === id)) {
-        $library.set({ ...state, selectedId: id })
-      }
-    })
-
-    ctx.effect($library, (state) => {
-      const ready = state.status === "ready"
+    ctx.effect([$library, $router, $selected], (state, page, selected) => {
       renderList(list, item, {
-        data: ready ? state.diagrams.map(({ id, title }) => ({
+        data: state.status === "ready" ? state.diagrams.map(({ id, title }) => ({
           id,
           title,
-          current: id === state.selectedId,
+          current: id === selected?.id,
         })) : [],
         key: ({ id }) => id,
         update: (row, { id, title, current }) => {
-          const button = ctx.getElement(row, "button")
-          button.textContent = title
-          button.setAttribute("data-diagram-id", String(id))
-          if (current) button.setAttribute("aria-current", "true")
-          else button.removeAttribute("aria-current")
+          const link = ctx.getElement(row, "a")
+          link.textContent = title
+          link.href = getPagePath($router, "diagram", { id: String(id) })
+          if (current) link.setAttribute("aria-current", "page")
+          else link.removeAttribute("aria-current")
         },
       })
 
       canvas.setAttribute("aria-busy", String(state.status === "loading"))
       if (state.status === "loading") message.textContent = "Loading diagrams…"
       else if (state.status === "error") message.textContent = "The diagram library could not be opened."
-      else message.textContent = ready && state.diagrams.length === 0 ? "No diagrams in this library." : ""
+      else if (!page) message.textContent = "This page could not be found."
+      else if (page.route === "diagram" && !selected) message.textContent = "This diagram could not be found."
+      else if (state.diagrams.length === 0) message.textContent = "No diagrams in this library."
+      else message.textContent = ""
       message.hidden = message.textContent === ""
     })
 

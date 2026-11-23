@@ -2,9 +2,15 @@ import { app, BrowserWindow, ipcMain, Menu } from "electron"
 import { join } from "node:path"
 import { listDiagramsChannel } from "../diagrams"
 import { listDiagrams } from "./database"
+import { registerRendererScheme, rendererURL, serveRenderer } from "./renderer-protocol"
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined
 declare const MAIN_WINDOW_VITE_NAME: string
+
+registerRendererScheme()
+
+const startURL = MAIN_WINDOW_VITE_DEV_SERVER_URL ?? rendererURL
+const rendererLocation = new URL(startURL)
 
 function openWindow() {
   const window = new BrowserWindow({
@@ -23,15 +29,21 @@ function openWindow() {
   })
 
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
-  window.webContents.on("will-navigate", (event) => event.preventDefault())
+  window.webContents.on("will-navigate", (event) => {
+    const destination = new URL(event.url)
+    if (destination.protocol !== rendererLocation.protocol || destination.host !== rendererLocation.host) {
+      event.preventDefault()
+    }
+  })
 
-  const page = MAIN_WINDOW_VITE_DEV_SERVER_URL
-    ? window.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL)
-    : window.loadFile(join(__dirname, "../renderer", MAIN_WINDOW_VITE_NAME, "index.html"))
-  void page.catch(console.error)
+  void window.loadURL(startURL).catch(console.error)
 }
 
 void app.whenReady().then(() => {
+  if (!MAIN_WINDOW_VITE_DEV_SERVER_URL) {
+    serveRenderer(join(__dirname, "../renderer", MAIN_WINDOW_VITE_NAME))
+  }
+
   ipcMain.handle(listDiagramsChannel, (event) => {
     if (!event.senderFrame || event.senderFrame !== event.sender.mainFrame) {
       throw new Error("Only the main window can read the diagram library.")

@@ -11,7 +11,7 @@ npm ci
 npm start
 ```
 
-On first launch Contextual creates `diagrams.sqlite` under Electron’s `userData` directory and seeds three examples. Choose a diagram in the sidebar to view it. The app exposes a read-only diagram API through Electron’s preload bridge.
+On first launch Contextual creates `diagrams.sqlite` under Electron’s `userData` directory and seeds three examples. Each sidebar link opens a diagram at `/diagrams/:id`. Browser history and reload retain the route. The app exposes a read-only diagram API through Electron’s preload bridge.
 
 ```sh
 npm run typecheck

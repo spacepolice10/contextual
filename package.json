@@ -24,6 +24,7 @@
   "description": "Local Mermaid diagram viewer",
   "main": ".vite/build/index.cjs",
   "dependencies": {
+    "@nanostores/router": "2.0.1",
     "nanostores": "1.5.5",
     "nanotags": "0.17.0",
     "pele": "1.13.0"
