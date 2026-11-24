@@ -1,7 +1,7 @@
-import { completeTask } from "./agent-runner"
+import type { completeTask } from "./agent-runner"
 import { claimTask, failTask, saveTaskResult } from "./database"
 
-export function createTaskWorker(databasePath: string, signal: AbortSignal) {
+export function createTaskWorker(databasePath: string, signal: AbortSignal, execute: typeof completeTask) {
   let active = 0
   let draining = false
   let requested = false
@@ -15,7 +15,7 @@ export function createTaskWorker(databasePath: string, signal: AbortSignal) {
           const task = await claimTask(databasePath)
           if (!task) break
           active++
-          void completeTask(task.context, signal)
+          void execute(task.context, signal)
             .then((result) => saveTaskResult(databasePath, task.diagramId, task.id, result))
             .catch(async () => {
               if (!signal.aborted) await failTask(databasePath, task.diagramId, task.id)

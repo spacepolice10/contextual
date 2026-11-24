@@ -31,7 +31,7 @@
             <p class="goal-status" data-ref="goalStatus" role="status" hidden></p>
             <div class="goal-actions">
               <button type="button" data-ref="goalCancel">Закрыть</button>
-              <button type="submit" data-ref="goalSubmit">Отправить в Codex</button>
+              <button type="submit" data-ref="goalSubmit">Создать цель</button>
             </div>
           </form>
         </section>
@@ -46,10 +46,16 @@
           <template data-ref="inspectorItem">
             <li><button type="button"><span></span><small></small></button></li>
           </template>
+          <form data-ref="inspectorAdd" hidden>
+            <label>Тип <select data-ref="inspectorKind"><option value="task">Задача</option><option value="comment">Комментарий</option><option value="solution">Результат</option><option value="evidence">Доказательство</option></select></label>
+            <input data-ref="inspectorName" required maxlength="2000" placeholder="Название записи">
+            <button type="submit">Добавить</button>
+            <p data-ref="inspectorAddStatus" role="status"></p>
+          </form>
           <button class="flow-inspector-action" type="button" data-ref="inspectorAction" hidden></button>
         </aside>
       </main>
     </contextual-library>
-    <script type="module" async src="/src/renderer/index.ts"></script>
+    <script type="module" async src="/src/renderer/bootstrap.ts"></script>
   </body>
 </html>

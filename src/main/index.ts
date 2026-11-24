@@ -1,9 +1,10 @@
 import { app, BrowserWindow, ipcMain, Menu, type IpcMainInvokeEvent } from "electron"
 import { watch, type FSWatcher } from "node:fs"
 import { join } from "node:path"
-import { createGoalChannel, diagramsChangedChannel, listDiagramsChannel, planGoalChannel, workflowActions, workflowChannel, type FlowNode, type WorkflowAction } from "../diagrams"
-import { applyWorkflow, createGoal, initializeLibrary, readGoal, readLibrary, recoverInterruptedTasks, saveGoalTasks } from "./database"
-import { generateGoalTasks } from "./agent-runner"
+import { createGoalChannel, createNodeChannel, diagramsChangedChannel, listDiagramsChannel, planGoalChannel, workflowActions, workflowChannel, type ContentKind, type WorkflowAction } from "../diagrams"
+import { recoverInterruptedTasks } from "./database"
+import { createLibrary, createPlanningService } from "../application/library"
+import { generateGoalTasks, completeTask } from "./agent-runner"
 import { registerRendererScheme, rendererURL, serveRenderer } from "./renderer-protocol"
 import { createTaskWorker } from "./task-worker"
 
@@ -58,16 +59,16 @@ async function start() {
   }
 
   const databasePath = join(app.getPath("userData"), "diagrams.sqlite")
-  const activePlans = new Map<string, Promise<FlowNode[]>>()
+  const library = createLibrary(databasePath)
   const agentRuns = new AbortController()
-  const worker = createTaskWorker(databasePath, agentRuns.signal)
+  const worker = createTaskWorker(databasePath, agentRuns.signal, completeTask)
+  const planGoal = createPlanningService(databasePath, generateGoalTasks, agentRuns.signal)
   app.on("before-quit", () => agentRuns.abort())
   let ready: Promise<void> | undefined
   let watcher: FSWatcher | undefined
 
   function openLibrary() {
     if (!ready) {
-      initializeLibrary(databasePath)
       ready = recoverInterruptedTasks(databasePath).then(() => worker.wake()).catch((error) => {
         ready = undefined
         throw error
@@ -91,29 +92,23 @@ async function start() {
         watcher = undefined
       })
     }
-    return readLibrary(databasePath)
+    return library.list()
   })
   app.on("will-quit", () => watcher?.close())
   ipcMain.handle(createGoalChannel, async (event, diagramId: number, text: string) => {
     assertRenderer(event)
     await openLibrary()
-    return createGoal(databasePath, diagramId, text)
+    return library.createGoal(diagramId, text)
   })
   ipcMain.handle(planGoalChannel, async (event, diagramId: number, goalId: number) => {
     assertRenderer(event)
     await openLibrary()
-    const { context, hasTasks } = await readGoal(databasePath, diagramId, goalId)
-    if (hasTasks) return []
-
-    const key = `${diagramId}:${goalId}`
-    const active = activePlans.get(key)
-    if (active) return active
-
-    const plan = generateGoalTasks(context, agentRuns.signal)
-      .then((names) => saveGoalTasks(databasePath, diagramId, goalId, names))
-      .finally(() => activePlans.delete(key))
-    activePlans.set(key, plan)
-    return plan
+    return planGoal(diagramId, goalId)
+  })
+  ipcMain.handle(createNodeChannel, async (event, diagramId: number, parentId: number, kind: ContentKind, name: string) => {
+    assertRenderer(event)
+    await openLibrary()
+    return library.createNode(diagramId, parentId, kind, name)
   })
   ipcMain.handle(workflowChannel, async (event, diagramId: number, action: WorkflowAction, contentId: number) => {
     assertRenderer(event)
@@ -121,7 +116,7 @@ async function start() {
       throw new Error("Действие недоступно.")
     }
     await openLibrary()
-    await applyWorkflow(databasePath, diagramId, action, contentId)
+    await library.workflow(diagramId, action, contentId)
     worker.wake()
   })
 

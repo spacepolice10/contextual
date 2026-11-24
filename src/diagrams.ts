@@ -33,7 +33,8 @@ export interface FlowNode {
 export interface DiagramLibrary {
   list: () => Promise<Diagram[]>
   createGoal: (diagramId: number, text: string) => Promise<FlowNode>
-  planGoal: (diagramId: number, goalId: number) => Promise<FlowNode[]>
+  createNode: (diagramId: number, parentId: number, kind: ContentKind, name: string) => Promise<FlowNode>
+  planGoal?: (diagramId: number, goalId: number) => Promise<FlowNode[]>
   workflow: (diagramId: number, action: WorkflowAction, contentId: number) => Promise<void>
   onChange: (listener: () => void) => () => void
 }
@@ -41,8 +42,9 @@ export interface DiagramLibrary {
 export const goalTextLimit = 2000
 export const listDiagramsChannel = "diagrams:list"
 export const createGoalChannel = "diagrams:createGoal"
+export const createNodeChannel = "diagrams:createNode"
 export const planGoalChannel = "diagrams:planGoal"
 export const diagramsChangedChannel = "diagrams:changed"
 export const workflowChannel = "diagrams:workflow"
-export const workflowActions = ["approve_plan", "accept_result", "retry_task"] as const
+export const workflowActions = ["approve_plan", "accept_result", "retry_task", "queue_task"] as const
 export type WorkflowAction = (typeof workflowActions)[number]

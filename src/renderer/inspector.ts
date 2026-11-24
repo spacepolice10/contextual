@@ -35,11 +35,13 @@ export function inspectFlow(flow: Flow, selection: FlowSelection) {
   let listed: FlowContent[] = items
 
   if (planParent && plan.some(({ status }) => status === "planned")) {
-    action = { type: "approve_plan", id: planParent.id, label: "Принять план и запустить Codex" }
+    action = { type: "approve_plan", id: planParent.id, label: "Принять план" }
   } else if (planParent?.kind === "goal" && !plan.length && selection.nodeId !== undefined) {
     action = { type: "plan_goal", id: selection.nodeId, label: "Составить план" }
   } else if (single?.kind === "solution" && single.status === "review") {
     action = { type: "accept_result", id: single.id, label: "Принять результат" }
+  } else if (single?.kind === "task" && single.status === "approved") {
+    action = { type: "queue_task", id: single.id, label: "Запустить Codex" }
   } else if (single?.kind === "task" && single.status === "failed") {
     action = { type: "retry_task", id: single.id, label: "Повторить задачу" }
   }

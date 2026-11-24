@@ -3,17 +3,14 @@ import { atom, computed } from "nanostores"
 import { define } from "nanotags"
 import { renderList } from "nanotags/render"
 import { mount } from "pele"
-import { goalTextLimit, type Diagram, type DiagramLibrary } from "../diagrams"
+import { goalTextLimit, type Diagram } from "../diagrams"
+import { libraryClient } from "../client/library"
 import { $router } from "./router"
 import { flowView, overlayRootButton, type FlowSelection } from "./flow"
 import { inspectFlow, statusLabel } from "./inspector"
 import "./styles.css"
 
 declare global {
-  interface Window {
-    diagrams: DiagramLibrary
-  }
-
   interface HTMLElementTagNameMap {
     "contextual-library": InstanceType<typeof ContextualLibrary>
   }
@@ -56,12 +53,17 @@ const ContextualLibrary = define("contextual-library")
     inspectorList: r.one("ul"),
     inspectorItem: r.one("template"),
     inspectorAction: r.one("button"),
+    inspectorAdd: r.one("form"),
+    inspectorKind: r.one("select"),
+    inspectorName: r.one("input"),
+    inspectorAddStatus: r.one("p"),
   }))
   .setup((ctx) => {
     const {
       list, item, title, canvas, message, diagram, goalForm, goalText, goalStatus, goalCancel, goalSubmit,
-      inspector, inspectorTitle, inspectorClose, inspectorStatus, inspectorBody, inspectorList, inspectorItem, inspectorAction,
+      inspector, inspectorTitle, inspectorClose, inspectorStatus, inspectorBody, inspectorList, inspectorItem, inspectorAction, inspectorAdd, inspectorKind, inspectorName, inspectorAddStatus,
     } = ctx.refs
+    const client = libraryClient()
     const $library = atom<LibraryState>({ status: "loading" })
     const $editor = atom<GoalEditor | null>(null)
     const $goalText = atom("")
@@ -85,7 +87,7 @@ const ContextualLibrary = define("contextual-library")
     async function loadLibrary(signal: AbortSignal) {
       const request = ++libraryRequest
       try {
-        const diagrams = await window.diagrams.list()
+        const diagrams = await client.list()
         if (signal.aborted || request !== libraryRequest) return
 
         const first = diagrams[0]
@@ -127,9 +129,10 @@ const ContextualLibrary = define("contextual-library")
       $actionState.set({ inspection, pending: true })
       try {
         if (action.type === "plan_goal") {
-          await window.diagrams.planGoal(inspection.diagramId, action.id)
+          if (!client.planGoal) return
+          await client.planGoal(inspection.diagramId, action.id)
         } else {
-          await window.diagrams.workflow(inspection.diagramId, action.type, action.id)
+          await client.workflow(inspection.diagramId, action.type, action.id)
         }
         await loadLibrary(request.signal)
         $actionState.set(null)
@@ -143,20 +146,10 @@ const ContextualLibrary = define("contextual-library")
       const text = $goalText.get().trim()
       if (!editor || editor.phase !== "editing" || !text || text.length > goalTextLimit) return
 
-      let current: GoalEditor = { ...editor, error: undefined, phase: editor.goalId ? "planning" : "saving" }
+      const current: GoalEditor = { ...editor, error: undefined, phase: "saving" }
       $editor.set(current)
       try {
-        let goalId = editor.goalId
-        if (goalId === undefined) {
-          const goal = await window.diagrams.createGoal(editor.diagramId, text)
-          goalId = goal.id
-          await loadLibrary(request.signal)
-          if ($editor.get() === current) {
-            current = { ...current, goalId, phase: "planning" }
-            $editor.set(current)
-          }
-        }
-        await window.diagrams.planGoal(editor.diagramId, goalId)
+        await client.createGoal(editor.diagramId, text)
         await loadLibrary(request.signal)
         if ($editor.get() === current) $editor.set(null)
       } catch (error) {
@@ -189,6 +182,20 @@ const ContextualLibrary = define("contextual-library")
         event.preventDefault()
         openInspection(target)
       }
+    })
+    ctx.on(inspectorAdd, "submit", async (event) => {
+      event.preventDefault()
+      const selection = $inspection.get()
+      const kind = inspectorKind.value
+      const name = inspectorName.value.trim()
+      if (!selection || selection.nodeId === undefined || !name) return
+      if (kind !== "task" && kind !== "comment" && kind !== "solution" && kind !== "evidence") return
+      inspectorAddStatus.textContent = ""
+      try {
+        await client.createNode(selection.diagramId, selection.nodeId, kind, name)
+        inspectorName.value = ""
+        await loadLibrary(request.signal)
+      } catch (error) { inspectorAddStatus.textContent = errorMessage(error, "Не удалось добавить запись.") }
     })
     ctx.on(inspectorClose, "click", () => $inspection.set(null))
     ctx.on(inspectorAction, "click", () => void performAction())
@@ -225,7 +232,7 @@ const ContextualLibrary = define("contextual-library")
       goalText.readOnly = pending || editor.goalId !== undefined
       goalCancel.disabled = pending
       goalSubmit.disabled = pending || !text.trim()
-      goalSubmit.textContent = editor.goalId && !pending ? "Повторить" : "Отправить в Codex"
+      goalSubmit.textContent = "Создать цель"
       goalStatus.textContent = pending
         ? (editor.phase === "saving" ? "Сохраняем цель…" : "Codex составляет список задач…")
         : editor.error ?? ""
@@ -237,6 +244,7 @@ const ContextualLibrary = define("contextual-library")
 
     ctx.effect([$inspector, $inspection, $actionState], (view, inspection, actionState) => {
       inspector.hidden = !view
+      inspectorAdd.hidden = inspection?.nodeId === undefined
       if (!view) return
       const localAction = actionState?.inspection === inspection ? actionState : undefined
       inspectorTitle.textContent = view.title
@@ -244,7 +252,7 @@ const ContextualLibrary = define("contextual-library")
       inspectorBody.hidden = !view.body
       inspectorStatus.textContent = localAction?.error ?? (localAction?.pending ? "Выполняется…" : view.status ? statusLabel[view.status] : "")
       inspectorStatus.hidden = !inspectorStatus.textContent
-      inspectorAction.hidden = !view.action
+      inspectorAction.hidden = !view.action || (["plan_goal", "queue_task", "retry_task"].includes(view.action.type) && !client.planGoal)
       inspectorAction.textContent = view.action?.label ?? ""
       inspectorAction.disabled = Boolean(actionState?.pending)
       inspectorList.hidden = !view.listed.length
@@ -326,6 +334,6 @@ const ContextualLibrary = define("contextual-library")
     })
 
     ctx.onCleanup(() => request.abort())
-    ctx.onCleanup(window.diagrams.onChange(() => void loadLibrary(request.signal)))
+    ctx.onCleanup(client.onChange(() => void loadLibrary(request.signal)))
     void loadLibrary(request.signal)
   })

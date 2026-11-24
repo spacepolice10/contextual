@@ -82,7 +82,7 @@ export function registerLibraryTools(server: McpServer, path: string, canEdit: b
   }, async ({ flowId, parentId, contentIds }) => result(await placeContent(path, flowId, parentId, contentIds)))
 
   server.registerTool("apply_workflow", {
-    description: "Apply an explicitly requested workflow action to content. Approving a plan or retrying a task queues work for Codex while the app runs.",
+    description: "Apply an explicitly requested workflow action to content. Approval and execution are separate. queue_task or retry_task explicitly queues local agent work.",
     inputSchema: z.strictObject({ flowId: id, contentId: id, action: z.enum(workflowActions) }),
     annotations: { ...edit, openWorldHint: true },
   }, async ({ flowId, contentId, action }) => {

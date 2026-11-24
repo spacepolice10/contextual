@@ -283,9 +283,12 @@ export function applyWorkflow(path: string, diagramId: number, action: WorkflowA
       if (content.kind === "goal") {
         await db.update(contents).set({ status: "approved" }).where(inFlow(contents, diagramId, content.id))
       }
-      await db.update(contents).set({ status: "queued" }).where(and(
+      await db.update(contents).set({ status: "approved" }).where(and(
         inFlow(contents, diagramId), eq(contents.parentId, content.id), eq(contents.kind, "task"), eq(contents.status, "planned"),
       ))
+    } else if (action === "queue_task") {
+      if (content.kind !== "task" || content.status !== "approved") throw new Error("Сначала примите задачу.")
+      await db.update(contents).set({ status: "queued" }).where(inFlow(contents, diagramId, content.id))
     } else if (action === "retry_task") {
       if (content.kind !== "task" || content.status !== "failed") throw new Error("Повтор доступен для задачи с ошибкой.")
       await db.update(contents).set({ status: "queued" }).where(inFlow(contents, diagramId, content.id))
