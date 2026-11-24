@@ -6,6 +6,7 @@ import { mount } from "pele"
 import { goalTextLimit, type Diagram, type DiagramLibrary } from "../diagrams"
 import { $router } from "./router"
 import { flowView, overlayRootButton, type FlowSelection } from "./flow"
+import { focusedFlow } from "./focused-view"
 import { inspectFlow, statusLabel } from "./inspector"
 import "./styles.css"
 
@@ -40,6 +41,9 @@ const ContextualLibrary = define("contextual-library")
     list: r.one("ul"),
     item: r.one("template"),
     title: r.one("h1"),
+    focusExit: r.one("a"),
+    focusCopy: r.one("button"),
+    inspectorFocus: r.one("a"),
     canvas: r.one("section"),
     message: r.one("p"),
     diagram: r.one("div"),
@@ -59,7 +63,7 @@ const ContextualLibrary = define("contextual-library")
   }))
   .setup((ctx) => {
     const {
-      list, item, title, canvas, message, diagram, goalForm, goalText, goalStatus, goalCancel, goalSubmit,
+      list, item, title, focusExit, focusCopy, inspectorFocus, canvas, message, diagram, goalForm, goalText, goalStatus, goalCancel, goalSubmit,
       inspector, inspectorTitle, inspectorClose, inspectorStatus, inspectorBody, inspectorList, inspectorItem, inspectorAction,
     } = ctx.refs
     const $library = atom<LibraryState>({ status: "loading" })
@@ -70,14 +74,19 @@ const ContextualLibrary = define("contextual-library")
     const request = new AbortController()
     let libraryRequest = 0
     const $selected = computed([$library, $router], (state, page) => {
-      if (state.status === "ready" && page?.route === "diagram") {
+      if (state.status === "ready" && (page?.route === "diagram" || page?.route === "focused")) {
         return state.diagrams.find(({ id }) => String(id) === page.params.id)
       }
     })
-    const $view = computed($selected, (selected) => selected?.flow ? flowView(selected.flow) : undefined)
+    const $focusedId = computed($router, (page) => page?.route === "focused" ? Number(page.params.nodeId) : undefined)
+    const $visibleFlow = computed([$selected, $focusedId], (selected, nodeId) => {
+      if (!selected?.flow) return
+      return nodeId === undefined ? selected.flow : focusedFlow(selected.flow, nodeId)
+    })
+    const $view = computed($visibleFlow, (flow) => flow ? flowView(flow) : undefined)
     const $diagramId = computed($selected, (selected) => selected?.id)
-    const $diagramName = computed($selected, (selected) => selected?.name)
-    const $diagramSource = computed([$selected, $view], (selected, view) => view?.source ?? selected?.source)
+    const $diagramName = computed([$selected, $focusedId, $visibleFlow], (selected, nodeId, flow) => nodeId === undefined ? selected?.name : flow?.nodes.find((node) => node.id === nodeId)?.name ?? selected?.name)
+    const $diagramSource = computed([$selected, $view, $focusedId], (selected, view, nodeId) => nodeId === undefined ? view?.source ?? selected?.source : view?.source)
     const $inspector = computed([$selected, $inspection], (selected, inspection) => {
       if (selected?.flow && selected.id === inspection?.diagramId) return inspectFlow(selected.flow, inspection)
     })
@@ -190,6 +199,20 @@ const ContextualLibrary = define("contextual-library")
         openInspection(target)
       }
     })
+    ctx.effect([$router], () => {
+      $inspection.set(null)
+      $editor.set(null)
+      focusCopy.textContent = "Copy link"
+    })
+    ctx.on(focusCopy, "click", async () => {
+      const url = window.location.href
+      try {
+        await navigator.clipboard.writeText(url)
+        if (window.location.href === url) focusCopy.textContent = "Copied"
+      } catch {
+        if (window.location.href === url) focusCopy.textContent = "Copy failed"
+      }
+    })
     ctx.on(inspectorClose, "click", () => $inspection.set(null))
     ctx.on(inspectorAction, "click", () => void performAction())
     ctx.on(inspectorList, "click", (event) => {
@@ -235,9 +258,13 @@ const ContextualLibrary = define("contextual-library")
       if (!goalForm.matches(":popover-open")) goalForm.showPopover()
     })
 
-    ctx.effect([$inspector, $inspection, $actionState], (view, inspection, actionState) => {
+    ctx.effect([$inspector, $inspection, $actionState, $focusedId, $visibleFlow], (view, inspection, actionState, focusedId, visibleFlow) => {
       inspector.hidden = !view
       if (!view) return
+      const nodeId = inspection?.nodeId
+      inspectorFocus.hidden = !inspection || nodeId === undefined || nodeId === focusedId || !visibleFlow?.nodes.some((node) => node.id === nodeId)
+      if (inspection && nodeId !== undefined && !inspectorFocus.hidden) inspectorFocus.href = getPagePath($router, "focused", { id: String(inspection.diagramId), nodeId: String(nodeId) })
+      else inspectorFocus.removeAttribute("href")
       const localAction = actionState?.inspection === inspection ? actionState : undefined
       inspectorTitle.textContent = view.title
       inspectorBody.textContent = view.body ?? ""
@@ -261,7 +288,7 @@ const ContextualLibrary = define("contextual-library")
       })
     })
 
-    ctx.effect([$library, $router, $selected], (state, page, selected) => {
+    ctx.effect([$library, $router, $selected, $visibleFlow], (state, page, selected, visibleFlow) => {
       renderList(list, item, {
         data: state.status === "ready" ? state.diagrams.map(({ id, name }) => ({
           id,
@@ -282,16 +309,25 @@ const ContextualLibrary = define("contextual-library")
       if (state.status === "loading") message.textContent = "Loading diagrams…"
       else if (state.status === "error") message.textContent = "The diagram library could not be opened."
       else if (!page) message.textContent = "This page could not be found."
-      else if (page.route === "diagram" && !selected) message.textContent = "This diagram could not be found."
+      else if ((page.route === "diagram" || page.route === "focused") && !selected) message.textContent = "This diagram could not be found."
+      else if (page.route === "focused" && !visibleFlow) message.textContent = "This focused view could not be found."
       else if (state.diagrams.length === 0) message.textContent = "No diagrams in this library."
       else message.textContent = ""
       message.hidden = message.textContent === ""
     })
 
+    ctx.effect([$selected, $focusedId], (selected, nodeId) => {
+      const focused = selected !== undefined && nodeId !== undefined
+      focusExit.hidden = !focused
+      focusCopy.hidden = !focused
+      if (focused) focusExit.href = getPagePath($router, "diagram", { id: String(selected.id) })
+      else focusExit.removeAttribute("href")
+    })
+
     ctx.effect([$diagramId, $diagramName, $diagramSource], (id, name, source) => {
       title.textContent = name ?? "Diagram library"
-      diagram.hidden = id === undefined
-      const flow = $selected.get()?.flow
+      diagram.hidden = id === undefined || source === undefined
+      const flow = $visibleFlow.get()
       diagram.toggleAttribute("data-flow", Boolean(flow))
       if (source === undefined) return
 
@@ -303,7 +339,7 @@ const ContextualLibrary = define("contextual-library")
         onRender: () => {
           const svg = diagram.querySelector("svg")
           if (!svg) return
-          if (!root) svg.setAttribute("role", "img")
+          if (!flow) svg.setAttribute("role", "img")
           svg.setAttribute("aria-label", name ?? "")
           if (root) overlayRootButton(svg, root)
           const view = $view.get()

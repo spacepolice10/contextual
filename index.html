@@ -21,6 +21,10 @@
       <main class="workspace">
         <header class="workspace-header">
           <h1 data-ref="title">Diagram library</h1>
+          <div class="focused-controls">
+            <a data-ref="focusExit" hidden>All diagram</a>
+            <button type="button" data-ref="focusCopy" aria-live="polite" hidden>Copy link</button>
+          </div>
         </header>
         <section class="canvas" aria-label="Diagram preview" data-ref="canvas" aria-busy="true" tabindex="0">
           <p class="message" role="status" data-ref="message">Loading diagrams…</p>
@@ -46,6 +50,7 @@
           <template data-ref="inspectorItem">
             <li><button type="button"><span></span><small></small></button></li>
           </template>
+          <a class="inspector-focus" data-ref="inspectorFocus" hidden>Focused View</a>
           <button class="flow-inspector-action" type="button" data-ref="inspectorAction" hidden></button>
         </aside>
       </main>
