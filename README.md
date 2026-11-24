@@ -25,7 +25,7 @@ Drizzle ORM handles the library queries over Electron's bundled `node:sqlite`. S
 
 ## Local agents and Contextual MCP
 
-Install Codex CLI and sign in with `codex login`. Codex is the first backend in the AgentsRuntime registry. The desktop application selects one backend with `CONTEXTUAL_AGENTS_BACKEND=codex` (default); set `CONTEXTUAL_AGENTS_EXECUTABLE` to an absolute CLI path if needed. No global MCP registration is required for built-in runs: each execution receives a scoped stdio MCP configuration. Planning and task execution use the same runtime; built-in runs are text-oriented, read-only and disable shell and web tools. Interrupted queued tasks are recovered by the desktop worker. Hono does not execute agents.
+Install Codex CLI and sign in with `codex login`. OpenAI (via Codex CLI) is the first backend in the AgentsRuntime registry. The desktop application selects one backend with `CONTEXTUAL_AGENTS_BACKEND=openai` (default); set `CONTEXTUAL_AGENTS_EXECUTABLE` to an absolute CLI path if needed. No global MCP registration is required for built-in runs: each execution receives a scoped stdio MCP configuration. Planning and task execution use the same runtime; built-in runs are text-oriented, read-only and disable shell and web tools. Interrupted queued tasks are recovered by the desktop worker. Hono does not execute agents.
 
 To connect a separate Codex session, launch Contextual once to initialize its database, then run the following from the development checkout. Replace the database path with the one under your Electron `userData` directory.
 

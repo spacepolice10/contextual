@@ -1,8 +1,8 @@
 import type { AgentsBackend, AgentsRequest } from "../backend"
 import { executeAgentsCli } from "../transports/cli"
 
-export class CodexBackend implements AgentsBackend {
-  readonly id = "codex"
+export class OpenAIBackend implements AgentsBackend {
+  readonly id = "openai"
   constructor(private readonly executable = "codex") {}
   async execute(request: AgentsRequest): Promise<void> {
     const { mcp, tools, directory, prompt, signal } = request
