@@ -4,14 +4,14 @@ A desktop viewer for local Mermaid diagrams. The diagram library is stored as Me
 
 ## Run locally
 
-Use Node.js 22.13 or later in the 22.x line, or Node.js 24 or later.
+Use Node.js 22.16 or later in the 22.x line, or Node.js 24 or later.
 
 ```sh
 npm ci
 npm start
 ```
 
-On first launch Contextual creates `diagrams.sqlite` under Electron’s `userData` directory and seeds three examples. Each sidebar link opens a diagram at `/diagrams/:id`. Browser history and reload retain the route. The app exposes a read-only diagram API through Electron’s preload bridge.
+On first launch Contextual creates `diagrams.sqlite` under Electron’s `userData` directory and seeds example diagrams and a flow. Each sidebar link opens a diagram at `/diagrams/:id`. Browser history and reload retain the route.
 
 ```sh
 npm run typecheck
@@ -19,7 +19,35 @@ npm run build
 npm run make
 ```
 
-Forge writes the packaged desktop app and ZIP into `out/`. The initial schema uses Electron’s bundled `node:sqlite` with one table and a versioned initialization transaction.
+Forge writes the packaged desktop app and ZIP into `out/`.
+
+Drizzle ORM handles the library queries over Electron's bundled `node:sqlite`. Schema migrations preserve existing diagram and node IDs. Flow content has its own IDs and parent relationships. A placement can reference several records, and the same record can appear in multiple placements.
+
+## Codex and Contextual MCP
+
+Install Codex CLI and sign in with `codex login`. Inside a flow, click `+` on the root and enter a goal. Contextual saves the goal and asks Codex for a plan through local stdio MCP. Open the goal or task list and choose **Принять план и запустить Codex** to start the queued tasks. Contextual runs up to two tasks at a time and puts each result, comment, and supporting item in its task branch. Open a result to read its full text and choose **Принять результат**. Failed tasks can be retried from their details.
+
+These built-in Codex runs produce text drafts and specifications. They have scoped access to the current goal or task, with shell and web tools disabled. Contextual resumes interrupted tasks when the app reopens.
+
+To connect a separate Codex session, launch Contextual once to initialize its database, then run the following from the development checkout. Replace the database path with the one under your Electron `userData` directory.
+
+```sh
+codex mcp add contextual -- node "$PWD/.vite/build/contextual-mcp.cjs" read "/absolute/path/to/diagrams.sqlite"
+```
+
+Use `read` to list diagrams and inspect flows. Choose `edit` when you want Codex to create and rename flows, add goals, tasks, comments, solutions or evidence, and edit or move branches. The server uses the selected database and validates each operation.
+
+`create_content` and `update_content` work on content records. `place_content` places existing records on the diagram, including several records in one node. `apply_workflow` supports the same plan approval, retry, and result acceptance actions as the app.
+
+For a packaged macOS build, point Codex at the installed app and its bundled server.
+
+```sh
+app_bundle="/absolute/path/to/contextual.app"
+codex mcp add contextual --env ELECTRON_RUN_AS_NODE=1 -- \
+  "$app_bundle/Contents/MacOS/contextual" \
+  "$app_bundle/Contents/Resources/app.asar/.vite/build/contextual-mcp.cjs" \
+  read "/absolute/path/to/diagrams.sqlite"
+```
 
 ## Frontend guidance
 

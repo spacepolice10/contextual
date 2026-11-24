@@ -1,6 +1,8 @@
+import type { FlowNode } from "../diagrams"
+
 export const starterDiagrams = [
   {
-    title: "Creative review",
+    name: "Creative review",
     source: `flowchart LR
   brief["Creative brief"] --> concept["First concept"]
   concept --> review{"Review"}
@@ -10,7 +12,7 @@ export const starterDiagrams = [
   class review highlight`,
   },
   {
-    title: "Asset handoff",
+    name: "Asset handoff",
     source: `sequenceDiagram
   actor Designer
   participant Library
@@ -20,7 +22,7 @@ export const starterDiagrams = [
   Library-->>Producer: Return the approved version`,
   },
   {
-    title: "Production states",
+    name: "Production states",
     source: `stateDiagram-v2
   [*] --> Draft
   Draft --> InReview
@@ -32,7 +34,7 @@ export const starterDiagrams = [
 ]
 
 export const contextualDevelopmentDiagramV2 = {
-  title: "Разработка Contextual",
+  name: "Разработка Contextual",
   source: `flowchart LR
   product["Contextual<br/>Рабочее пространство для контент-креаторов"]
 
@@ -65,7 +67,7 @@ export const contextualDevelopmentDiagramV2 = {
 }
 
 export const contextualDevelopmentDiagram = {
-  title: contextualDevelopmentDiagramV2.title,
+  name: contextualDevelopmentDiagramV2.name,
   source: `${contextualDevelopmentDiagramV2.source}
 
   desktop --> buildEvidence["Подтверждение<br/>Сборка Linux: npm run build<br/>Коммит afe05f7"]
@@ -76,3 +78,16 @@ export const contextualDevelopmentDiagram = {
   classDef evidence fill:#e6edf3,stroke:#657986,color:#293b49
   class buildEvidence,storageEvidence,renderEvidence,routeEvidence evidence`,
 }
+const wildberriesFlowName = "Подготовка карточки Wildberries"
+
+export const wildberriesFlow = {
+  name: wildberriesFlowName,
+  nodes: [
+    { id: 1, parentId: null, kind: "root", name: wildberriesFlowName },
+    { id: 2, parentId: 1, kind: "goal", name: "Подготовить первый слайд карточки WB" },
+    { id: 3, parentId: 2, kind: "task", name: "Собрать макет с ветровкой" },
+    { id: 4, parentId: 3, kind: "comment", name: "Убрать логотип с флага" },
+    { id: 5, parentId: 3, kind: "solution", name: "Макет с крупным заголовком" },
+    { id: 6, parentId: 5, kind: "evidence", name: "Предпросмотр в размере мобильной выдачи" },
+  ],
+} satisfies { name: string; nodes: Omit<FlowNode, "contentIds">[] }

@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": "^22.13.0 || >=24.0.0"
+    "node": "^22.16.0 || >=24.0.0"
   },
   "scripts": {
     "build": "electron-forge package",
@@ -24,9 +24,12 @@
   "description": "Local Mermaid diagram viewer",
   "main": ".vite/build/index.cjs",
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
     "@nanostores/router": "2.0.1",
+    "drizzle-orm": "0.45.4",
     "nanostores": "1.5.5",
     "nanotags": "0.17.0",
-    "pele": "1.13.0"
+    "pele": "1.13.0",
+    "zod": "4.6.7"
   }
 }

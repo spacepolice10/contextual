@@ -22,10 +22,32 @@
         <header class="workspace-header">
           <h1 data-ref="title">Diagram library</h1>
         </header>
-        <section class="canvas" aria-label="Diagram preview" data-ref="canvas" aria-busy="true">
+        <section class="canvas" aria-label="Diagram preview" data-ref="canvas" aria-busy="true" tabindex="0">
           <p class="message" role="status" data-ref="message">Loading diagrams…</p>
           <div class="diagram" data-ref="diagram" hidden></div>
+          <form class="goal-form" data-ref="goalForm" popover="manual" role="dialog" lang="ru" aria-labelledby="goal-label">
+            <label id="goal-label" for="goal-text">Новая цель</label>
+            <textarea id="goal-text" data-ref="goalText" rows="3" required autofocus placeholder="Какого результата вы хотите добиться?"></textarea>
+            <p class="goal-status" data-ref="goalStatus" role="status" hidden></p>
+            <div class="goal-actions">
+              <button type="button" data-ref="goalCancel">Закрыть</button>
+              <button type="submit" data-ref="goalSubmit">Отправить в Codex</button>
+            </div>
+          </form>
         </section>
+        <aside class="flow-inspector" data-ref="inspector" aria-labelledby="flow-selection" lang="ru" hidden>
+          <header>
+            <h2 id="flow-selection" data-ref="inspectorTitle"></h2>
+            <button type="button" data-ref="inspectorClose" aria-label="Закрыть">×</button>
+          </header>
+          <p class="flow-inspector-status" data-ref="inspectorStatus" role="status" hidden></p>
+          <p class="flow-inspector-body" data-ref="inspectorBody" hidden></p>
+          <ul class="flow-inspector-items" data-ref="inspectorList" hidden></ul>
+          <template data-ref="inspectorItem">
+            <li><button type="button"><span></span><small></small></button></li>
+          </template>
+          <button class="flow-inspector-action" type="button" data-ref="inspectorAction" hidden></button>
+        </aside>
       </main>
     </contextual-library>
     <script type="module" async src="/src/renderer/index.ts"></script>
