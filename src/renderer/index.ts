@@ -69,6 +69,8 @@ const ContextualLibrary = define("contextual-library")
     const $actionState = atom<{ inspection: Inspection; pending: boolean; error?: string } | null>(null)
     const request = new AbortController()
     let libraryRequest = 0
+    const pendingFlows = new Set<number>()
+    let refreshing = false
     const $selected = computed([$library, $router], (state, page) => {
       if (state.status === "ready" && page?.route === "diagram") {
         return state.diagrams.find(({ id }) => String(id) === page.params.id)
@@ -93,19 +95,50 @@ const ContextualLibrary = define("contextual-library")
           redirectPage($router, "diagram", { id: String(first.id) })
         }
         const state = $library.get()
-        const previous = state.status === "ready" ? state.diagrams : []
-        const next = diagrams.map((entry, index) => {
-          const current = previous[index]
-          return current?.id === entry.id && JSON.stringify(current) === JSON.stringify(entry) ? current : entry
-        })
-        if (state.status !== "ready" || previous.length !== next.length || next.some((entry, index) => entry !== previous[index])) {
-          $library.set({ status: "ready", diagrams: next })
-        }
+        $library.set({ status: "ready", diagrams })
       } catch (error) {
         console.error(error)
         if (!signal.aborted && request === libraryRequest && $library.get().status !== "ready") {
           $library.set({ status: "error" })
         }
+      }
+    }
+
+    async function refreshFlows(ids: number[]) {
+      for (const id of ids) pendingFlows.add(id)
+      if (refreshing) return
+      refreshing = true
+      try {
+        while (pendingFlows.size && !request.signal.aborted) {
+          const state = $library.get()
+          const batch = [...pendingFlows]
+          pendingFlows.clear()
+          if (state.status !== "ready") {
+            await loadLibrary(request.signal)
+            continue
+          }
+          const generation = libraryRequest
+          const updates = await Promise.all(batch.map(async (id) => [id, await window.diagrams.get(id)] as const))
+          if (request.signal.aborted) return
+          if (generation !== libraryRequest) {
+            for (const id of batch) pendingFlows.add(id)
+            continue
+          }
+          const current = $library.get()
+          if (current.status !== "ready") continue
+          const next = new Map(current.diagrams.map((entry) => [entry.id, entry]))
+          for (const [id, entry] of updates) {
+            if (entry) next.set(id, entry)
+            else next.delete(id)
+          }
+          $library.set({ status: "ready", diagrams: [...next.values()].sort((a, b) => a.id - b.id) })
+        }
+      } catch (error) {
+        console.error(error)
+        if (!request.signal.aborted) await loadLibrary(request.signal)
+      } finally {
+        refreshing = false
+        if (pendingFlows.size && !request.signal.aborted) void refreshFlows([])
       }
     }
 
@@ -131,7 +164,7 @@ const ContextualLibrary = define("contextual-library")
         } else {
           await window.diagrams.workflow(inspection.diagramId, action.type, action.id)
         }
-        await loadLibrary(request.signal)
+        await refreshFlows([inspection.diagramId])
         $actionState.set(null)
       } catch (error) {
         $actionState.set({ inspection, pending: false, error: errorMessage(error, "Действие не выполнено.") })
@@ -150,14 +183,14 @@ const ContextualLibrary = define("contextual-library")
         if (goalId === undefined) {
           const goal = await window.diagrams.createGoal(editor.diagramId, text)
           goalId = goal.id
-          await loadLibrary(request.signal)
+          await refreshFlows([editor.diagramId])
           if ($editor.get() === current) {
             current = { ...current, goalId, phase: "planning" }
             $editor.set(current)
           }
         }
         await window.diagrams.planGoal(editor.diagramId, goalId)
-        await loadLibrary(request.signal)
+        await refreshFlows([editor.diagramId])
         if ($editor.get() === current) $editor.set(null)
       } catch (error) {
         if ($editor.get() !== current) return
@@ -326,6 +359,6 @@ const ContextualLibrary = define("contextual-library")
     })
 
     ctx.onCleanup(() => request.abort())
-    ctx.onCleanup(window.diagrams.onChange(() => void loadLibrary(request.signal)))
+    ctx.onCleanup(window.diagrams.onChange((events) => void refreshFlows(events.map(({ flowId }) => flowId))))
     void loadLibrary(request.signal)
   })

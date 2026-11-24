@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
 import { delimiter, join } from "node:path"
 import { promisify } from "node:util"
+import type { TaskContext } from "../diagrams"
 import { goalPlanSchema, taskResultSchema } from "./goal-plan-schema"
 
 const execFileAsync = promisify(execFile)
@@ -63,15 +64,12 @@ async function runAgent(
 
 export async function generateGoalTasks(context: { flow: string; goal: string; details: string | null }, signal: AbortSignal) {
   const response = await runAgent("plan-goal", context, ["get_goal", "submit_goal_plan"],
-    "Read get_goal for the desired outcome. Propose an ordered list of distinct, actionable tasks in the goal language. Respect any explicit variant count and assign each requested variant its own task with an identifiable angle. Only plan. Call submit_goal_plan once with the complete list.", signal)
-  return goalPlanSchema.parse(response).tasks
+    "Read get_goal for the desired outcome. Propose ordered groups of distinct, actionable tasks in the goal language. Use sequential mode by default; use parallel only for genuinely independent tasks or alternative variants. Groups run in order, and later stages wait for accepted results. Respect any explicit variant count and assign each requested variant its own task. Only plan. Call submit_goal_plan once with the complete groups.", signal)
+  return goalPlanSchema.parse(response).groups
 }
 
-export async function completeTask(context: {
-  flow: string; goal?: string; goalDetails?: string | null; parentTask?: string
-  task: string; details: string | null; siblingTasks: string[]
-}, signal: AbortSignal) {
+export async function completeTask(context: TaskContext, signal: AbortSignal) {
   const response = await runAgent("work-task", context, ["get_task", "submit_task_result"],
-    "Read get_task, then carry out that single task in the goal language. Produce the actual draft, recommendations, or usable specification in the solution body. For work that requires files, visual rendering, external data or tools you lack, deliver the part you can do here and clearly state what is pending. Distinguish this variant from its siblings. Add a comment only when it helps review. Include evidence only for actual, reproducible checks or concrete references, and never invent them. Call submit_task_result once with the finished contribution.", signal)
+    "Read get_task, then carry out that single task in the goal language. Use the accepted prerequisite results supplied in the context. If a revision is supplied, produce a new complete version based on that exact base version and instruction, without replacing the original. Produce the actual draft, recommendations, or usable specification in the solution body. For work that requires files, visual rendering, external data or tools you lack, deliver the part you can do here and clearly state what is pending. Distinguish this variant from its siblings. Add a comment only when it helps review. Include evidence only for actual, reproducible checks or concrete references, and never invent them. Call submit_task_result once with the finished contribution.", signal)
   return taskResultSchema.parse(response)
 }

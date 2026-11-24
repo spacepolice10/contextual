@@ -1,7 +1,7 @@
 import { completeTask } from "./agent-runner"
-import { claimTask, failTask, saveTaskResult } from "./database"
+import { claimTask, failWork, saveTaskResult } from "./database"
 
-export function createTaskWorker(databasePath: string, signal: AbortSignal) {
+export function createTaskWorker(databasePath: string, signal: AbortSignal, onChange: () => void = () => {}) {
   let active = 0
   let draining = false
   let requested = false
@@ -15,14 +15,16 @@ export function createTaskWorker(databasePath: string, signal: AbortSignal) {
           const task = await claimTask(databasePath)
           if (!task) break
           active++
+          onChange()
           void completeTask(task.context, signal)
-            .then((result) => saveTaskResult(databasePath, task.diagramId, task.id, result))
-            .catch(async () => {
-              if (!signal.aborted) await failTask(databasePath, task.diagramId, task.id)
+            .then((result) => saveTaskResult(databasePath, task.id, result))
+            .catch(async (error: unknown) => {
+              if (!signal.aborted) await failWork(databasePath, task.id, error instanceof Error ? error.message : String(error))
             })
             .catch(console.error)
             .finally(() => {
               active--
+              onChange()
               wake()
             })
         }

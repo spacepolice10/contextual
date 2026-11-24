@@ -1,9 +1,10 @@
 import type { DatabaseSync } from "node:sqlite"
+import { migrateWorkflow } from "./workflow-migration"
 import { contextualDevelopmentDiagram, contextualDevelopmentDiagramV2, starterDiagrams, wildberriesFlow } from "./seed"
 
 export function migrate(db: DatabaseSync) {
   const schemaVersion = db.prepare("PRAGMA user_version")
-  if (Number(schemaVersion.get()?.user_version) < 7) {
+  if (Number(schemaVersion.get()?.user_version) < 8) {
     db.exec("BEGIN IMMEDIATE")
     // Another instance may have migrated the file while this one acquired the lock.
     const version = Number(schemaVersion.get()?.user_version)
@@ -131,6 +132,7 @@ export function migrate(db: DatabaseSync) {
       CREATE INDEX flow_node_contents_content ON flow_node_contents(diagram_id,content_id);
       PRAGMA user_version = 7;
     `)
+    if (version < 8) migrateWorkflow(db)
     db.exec("COMMIT")
   }
 }

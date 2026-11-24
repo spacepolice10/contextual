@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { z } from "zod"
 import { goalTextLimit, workflowActions } from "../diagrams"
-import { applyWorkflow, createContent, createFlow, createFlowNode, placeContent, readLibrary, renameFlow, updateContent, updateFlowNode } from "./database"
+import { acceptResultVersion, configureTaskPlan, createResultVersion, queueRevision, retryRevision, applyWorkflow, createContent, createFlow, createFlowNode, placeContent, readLibrary, renameFlow, updateContent, updateFlowNode } from "./database"
 
 const id = z.number().int().positive()
 const diagramName = z.string().trim().min(1).max(160)
@@ -66,11 +66,47 @@ export function registerLibraryTools(server: McpServer, path: string, canEdit: b
   }, async ({ flowId, ...content }) => result(await createContent(path, flowId, content)))
 
   server.registerTool("update_content", {
-    description: "Edit a content record. All visual placements keep their IDs and reflect the update.",
+    description: "Edit a content record. For a result, append an immutable version; existing versions and the selected version are preserved.",
     inputSchema: z.strictObject({ flowId: id, contentId: id, name: nodeName.optional(), body: body.optional() })
       .refine((input) => input.name !== undefined || input.body !== undefined, "Provide name or body."),
     annotations: { ...edit, idempotentHint: true },
   }, async ({ flowId, contentId, ...changes }) => result(await updateContent(path, flowId, contentId, changes)))
+
+  server.registerTool("configure_task_plan", {
+    description: "Arrange every draft task under one goal or task into ordered groups. Sequential is the default. Parallel tasks in a group may run concurrently. Content IDs, not placement IDs.",
+    inputSchema: z.strictObject({ flowId: id, parentId: id, groups: z.array(z.strictObject({
+      mode: z.enum(["sequential", "parallel"]).default("sequential"), taskIds: z.array(id).min(1),
+    })).min(1) }),
+    annotations: edit,
+  }, async ({ flowId, parentId, groups }) => result(await configureTaskPlan(path, flowId, parentId, groups)))
+
+  server.registerTool("create_result_version", {
+    description: "Append a result version based on any existing version of that result. Never overwrites an old version.",
+    inputSchema: z.strictObject({ flowId: id, contentId: id, parentVersionId: id, name: nodeName.optional(), body: body.optional() })
+      .refine((input) => input.name !== undefined || input.body !== undefined, "Provide name or body."),
+    annotations: edit,
+  }, async ({ flowId, contentId, parentVersionId, ...changes }) => result(await createResultVersion(path, flowId, contentId, parentVersionId, changes)))
+
+  server.registerTool("accept_result_version", {
+    description: "Select a specific result version for continuation, only when explicitly requested by the user.",
+    inputSchema: z.strictObject({ flowId: id, contentId: id, versionId: id }),
+    annotations: { ...edit, openWorldHint: true },
+  }, async ({ flowId, contentId, versionId }) => {
+    await acceptResultVersion(path, flowId, contentId, versionId)
+    return result({ applied: true })
+  })
+
+  server.registerTool("queue_revision", {
+    description: "Queue explicitly requested Codex work based on an exact result version and revision instruction.",
+    inputSchema: z.strictObject({ flowId: id, resultId: id, baseVersionId: id, instruction: z.string().trim().min(1).max(goalTextLimit) }),
+    annotations: { ...edit, openWorldHint: true },
+  }, async ({ flowId, resultId, baseVersionId, instruction }) => result(await queueRevision(path, flowId, resultId, baseVersionId, instruction)))
+
+  server.registerTool("retry_revision", {
+    description: "Retry failed revision work when explicitly requested by the user. Preserves the previous AgentsWork record.",
+    inputSchema: z.strictObject({ flowId: id, workId: id }),
+    annotations: { ...edit, openWorldHint: true },
+  }, async ({ flowId, workId }) => result(await retryRevision(path, flowId, workId)))
 
   server.registerTool("place_content", {
     description: "Add a visual node referencing one or more existing content records. parentId is a visual node ID.",

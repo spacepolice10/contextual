@@ -1,4 +1,5 @@
 import type { ContentStatus, Flow, FlowContent, WorkflowAction } from "../diagrams"
+import { taskOrder } from "../main/workflow"
 import type { FlowSelection } from "./flow"
 
 export const statusLabel: Record<ContentStatus, string> = {
@@ -30,7 +31,7 @@ export function inspectFlow(flow: Flow, selection: FlowSelection) {
       && items.every((item) => item.kind === "task" && item.parentId === parent.id) ? parent
     : undefined
   const children = (id: number) => flow.contents.filter((content) => content.parentId === id)
-  const plan = planParent ? children(planParent.id).filter(({ kind }) => kind === "task") : []
+  const plan = planParent ? children(planParent.id).filter(({ kind }) => kind === "task").sort(taskOrder) : []
   let action: InspectorAction | undefined
   let listed: FlowContent[] = items
 
@@ -45,7 +46,7 @@ export function inspectFlow(flow: Flow, selection: FlowSelection) {
   }
 
   if (planParent && !single) listed = plan
-  else if (single) listed = children(single.id)
+  else if (single) listed = children(single.id).sort((a, b) => a.kind === "task" && b.kind === "task" ? taskOrder(a, b) : a.id - b.id)
 
   const title = single?.name ?? (planParent ? "План задач" : "Записи")
   return { title, body: single?.body, status: (single ?? planParent)?.status, listed, action }

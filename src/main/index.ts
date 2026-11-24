@@ -1,8 +1,8 @@
 import { app, BrowserWindow, ipcMain, Menu, type IpcMainInvokeEvent } from "electron"
-import { watch, type FSWatcher } from "node:fs"
+import { createChangeDispatcher } from "./change-dispatcher"
 import { join } from "node:path"
-import { createGoalChannel, diagramsChangedChannel, listDiagramsChannel, planGoalChannel, workflowActions, workflowChannel, type FlowNode, type WorkflowAction } from "../diagrams"
-import { applyWorkflow, createGoal, initializeLibrary, readGoal, readLibrary, recoverInterruptedTasks, saveGoalTasks } from "./database"
+import { createGoalChannel, getDiagramChannel, diagramsChangedChannel, listDiagramsChannel, planGoalChannel, workflowActions, workflowChannel, type FlowNode, type WorkflowAction } from "../diagrams"
+import { applyWorkflow, beginPlanning, failWork, createGoal, initializeLibrary, readGoal, readLibrary, recoverInterruptedTasks, saveGoalTasks } from "./database"
 import { generateGoalTasks } from "./agent-runner"
 import { registerRendererScheme, rendererURL, serveRenderer } from "./renderer-protocol"
 import { createTaskWorker } from "./task-worker"
@@ -60,15 +60,20 @@ async function start() {
   const databasePath = join(app.getPath("userData"), "diagrams.sqlite")
   const activePlans = new Map<string, Promise<FlowNode[]>>()
   const agentRuns = new AbortController()
-  const worker = createTaskWorker(databasePath, agentRuns.signal)
+  const dispatcher = createChangeDispatcher(databasePath, (events) => {
+    worker.wake()
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.webContents.isDestroyed()) window.webContents.send(diagramsChangedChannel, events)
+    }
+  })
+  const worker = createTaskWorker(databasePath, agentRuns.signal, () => dispatcher.wake())
   app.on("before-quit", () => agentRuns.abort())
   let ready: Promise<void> | undefined
-  let watcher: FSWatcher | undefined
 
   function openLibrary() {
     if (!ready) {
       initializeLibrary(databasePath)
-      ready = recoverInterruptedTasks(databasePath).then(() => worker.wake()).catch((error) => {
+      ready = dispatcher.start().then(() => recoverInterruptedTasks(databasePath)).then(() => { worker.wake(); dispatcher.wake() }).catch((error) => {
         ready = undefined
         throw error
       })
@@ -79,25 +84,21 @@ async function start() {
   ipcMain.handle(listDiagramsChannel, async (event) => {
     assertRenderer(event)
     await openLibrary()
-    if (!watcher) {
-      watcher = watch(databasePath, { persistent: false }, () => {
-        worker.wake()
-        for (const window of BrowserWindow.getAllWindows()) {
-          if (!window.webContents.isDestroyed()) window.webContents.send(diagramsChangedChannel)
-        }
-      })
-      watcher.on("error", () => {
-        watcher?.close()
-        watcher = undefined
-      })
-    }
     return readLibrary(databasePath)
   })
-  app.on("will-quit", () => watcher?.close())
+  ipcMain.handle(getDiagramChannel, async (event, id: number) => {
+    assertRenderer(event)
+    if (!Number.isSafeInteger(id) || id < 1) throw new Error("Invalid diagram ID.")
+    await openLibrary()
+    return (await readLibrary(databasePath, id))[0] ?? null
+  })
+  app.on("will-quit", () => dispatcher.stop())
   ipcMain.handle(createGoalChannel, async (event, diagramId: number, text: string) => {
     assertRenderer(event)
     await openLibrary()
-    return createGoal(databasePath, diagramId, text)
+    const goal = await createGoal(databasePath, diagramId, text)
+    dispatcher.wake()
+    return goal
   })
   ipcMain.handle(planGoalChannel, async (event, diagramId: number, goalId: number) => {
     assertRenderer(event)
@@ -109,9 +110,19 @@ async function start() {
     const active = activePlans.get(key)
     if (active) return active
 
-    const plan = generateGoalTasks(context, agentRuns.signal)
-      .then((names) => saveGoalTasks(databasePath, diagramId, goalId, names))
-      .finally(() => activePlans.delete(key))
+    const plan = (async () => {
+      const workId = await beginPlanning(databasePath, diagramId, goalId, context)
+      dispatcher.wake()
+      try {
+        const groups = await generateGoalTasks(context, agentRuns.signal)
+        return await saveGoalTasks(databasePath, diagramId, goalId, groups, workId)
+      } catch (error) {
+        if (!agentRuns.signal.aborted) await failWork(databasePath, workId, error instanceof Error ? error.message : String(error))
+        throw error
+      } finally {
+        dispatcher.wake()
+      }
+    })().finally(() => activePlans.delete(key))
     activePlans.set(key, plan)
     return plan
   })
@@ -123,6 +134,7 @@ async function start() {
     await openLibrary()
     await applyWorkflow(databasePath, diagramId, action, contentId)
     worker.wake()
+    dispatcher.wake()
   })
 
   if (process.platform !== "darwin") Menu.setApplicationMenu(null)

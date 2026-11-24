@@ -25,7 +25,7 @@ Drizzle ORM handles the library queries over Electron's bundled `node:sqlite`. S
 
 ## Codex and Contextual MCP
 
-Install Codex CLI and sign in with `codex login`. Inside a flow, click `+` on the root and enter a goal. Contextual saves the goal and asks Codex for a plan through local stdio MCP. Open the goal or task list and choose **Принять план и запустить Codex** to start the queued tasks. Contextual runs up to two tasks at a time and puts each result, comment, and supporting item in its task branch. Open a result to read its full text and choose **Принять результат**. Failed tasks can be retried from their details.
+Install Codex CLI and sign in with `codex login`. Inside a flow, click `+` on the root and enter a goal. Contextual saves the goal and asks Codex for a plan through local stdio MCP. Open the goal or task list and choose **Принять план и запустить Codex** to start the queued tasks. Contextual runs up to two eligible tasks at a time. Tasks default to sequential stages; explicitly parallel tasks share a stage. Later stages wait for earlier results to be accepted and receive their selected versions. Each result, comment, and supporting item is placed in its task branch. Open a result to read its full text and choose **Принять результат**. Failed tasks can be retried from their details.
 
 These built-in Codex runs produce text drafts and specifications. They have scoped access to the current goal or task, with shell and web tools disabled. Contextual resumes interrupted tasks when the app reopens.
 
@@ -52,3 +52,7 @@ codex mcp add contextual --env ELECTRON_RUN_AS_NODE=1 -- \
 ## Frontend guidance
 
 The repository includes upstream project skills for [nanotags components](https://github.com/psd-coder/nanotags/tree/main/packages/nanotags/skills/nanotags-components), the [Evil Martians design system workflow](https://github.com/ymandrikov/ai-design-system/tree/main/skills/design-system), and [Evil Martians’ Tailwind CSS practices](https://github.com/evilmartians/agent-skills/tree/main/skills/tailwind-best-practices). The app styles use plain CSS.
+
+## Workflow persistence
+
+SQLite schema v8 introduces immutable result versions, durable `agents_work` attempts, and transactional `change_events`. The existing result inspector shows the latest version; a previously accepted version remains selected until another version is accepted. External MCP clients can use `configure_task_plan`, `create_result_version`, `accept_result_version`, `queue_revision` and `retry_revision`. No version-stack UI is required to use these tools. Change events are delivered across processes by polling a monotonic cursor; the renderer refreshes affected flows rather than the entire library.
