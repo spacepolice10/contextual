@@ -9,7 +9,7 @@ export const statusLabel: Record<ContentStatus, string> = {
   running: "В работе",
   review: "На проверке",
   accepted: "Принято",
-  failed: "Codex не вернул результат",
+  failed: "Агент не вернул результат",
 }
 
 interface InspectorAction {
@@ -41,7 +41,7 @@ export function inspectFlow(flow: Flow, selection: FlowSelection) {
   } else if (single?.kind === "solution" && single.status === "review") {
     action = { type: "accept_result", id: single.id, label: "Принять результат" }
   } else if (single?.kind === "task" && single.status === "approved") {
-    action = { type: "queue_task", id: single.id, label: "Запустить Codex" }
+    action = { type: "queue_task", id: single.id, label: "Запустить агента" }
   } else if (single?.kind === "task" && single.status === "failed") {
     action = { type: "retry_task", id: single.id, label: "Повторить задачу" }
   }

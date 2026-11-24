@@ -1,7 +1,7 @@
-import type { completeTask } from "./agent-runner"
+import type { AgentsRuntime } from "../agents/runtime"
 import { claimTask, failTask, saveTaskResult } from "./database"
 
-export function createTaskWorker(databasePath: string, signal: AbortSignal, execute: typeof completeTask) {
+export function createTaskWorker(databasePath: string, signal: AbortSignal, execute: AgentsRuntime["completeTask"]) {
   let active = 0
   let draining = false
   let requested = false

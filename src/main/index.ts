@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { createGoalChannel, createNodeChannel, diagramsChangedChannel, listDiagramsChannel, planGoalChannel, workflowActions, workflowChannel, type ContentKind, type WorkflowAction } from "../diagrams"
 import { recoverInterruptedTasks } from "./database"
 import { createLibrary, createPlanningService } from "../application/library"
-import { generateGoalTasks, completeTask } from "./agent-runner"
+import { createDesktopAgentsRuntime } from "./agents"
 import { registerRendererScheme, rendererURL, serveRenderer } from "./renderer-protocol"
 import { createTaskWorker } from "./task-worker"
 
@@ -61,8 +61,9 @@ async function start() {
   const databasePath = join(app.getPath("userData"), "diagrams.sqlite")
   const library = createLibrary(databasePath)
   const agentRuns = new AbortController()
-  const worker = createTaskWorker(databasePath, agentRuns.signal, completeTask)
-  const planGoal = createPlanningService(databasePath, generateGoalTasks, agentRuns.signal)
+  const agents = createDesktopAgentsRuntime()
+  const worker = createTaskWorker(databasePath, agentRuns.signal, agents.completeTask.bind(agents))
+  const planGoal = createPlanningService(databasePath, agents.generateGoalTasks.bind(agents), agentRuns.signal)
   app.on("before-quit", () => agentRuns.abort())
   let ready: Promise<void> | undefined
   let watcher: FSWatcher | undefined

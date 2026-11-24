@@ -234,7 +234,7 @@ const ContextualLibrary = define("contextual-library")
       goalSubmit.disabled = pending || !text.trim()
       goalSubmit.textContent = "Создать цель"
       goalStatus.textContent = pending
-        ? (editor.phase === "saving" ? "Сохраняем цель…" : "Codex составляет список задач…")
+        ? (editor.phase === "saving" ? "Сохраняем цель…" : "Агент составляет список задач…")
         : editor.error ?? ""
       goalStatus.hidden = !goalStatus.textContent
       goalForm.style.setProperty("--goal-left", `${editor.left}px`)

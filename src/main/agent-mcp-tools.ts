@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js"
-import { goalPlanSchema, taskResultSchema } from "./goal-plan-schema"
+import { goalPlanSchema, taskResultSchema } from "../agents/work-schema"
 
 export function registerAgentTools(server: McpServer, directory: string, mode: "plan-goal" | "work-task") {
   const context = readFileSync(join(directory, "context.json"), "utf8")

@@ -23,11 +23,9 @@ Forge writes the packaged desktop app and ZIP into `out/`.
 
 Drizzle ORM handles the library queries over Electron's bundled `node:sqlite`. Schema migrations preserve existing diagram and node IDs. Flow content has its own IDs and parent relationships. A placement can reference several records, and the same record can appear in multiple placements.
 
-## Codex and Contextual MCP
+## Local agents and Contextual MCP
 
-Install Codex CLI and sign in with `codex login`. Inside a flow, click `+` on the root and enter a goal. Contextual saves the goal and asks Codex for a plan through local stdio MCP. Open the goal or task list and choose **Принять план и запустить Codex** to start the queued tasks. Contextual runs up to two tasks at a time and puts each result, comment, and supporting item in its task branch. Open a result to read its full text and choose **Принять результат**. Failed tasks can be retried from their details.
-
-These built-in Codex runs produce text drafts and specifications. They have scoped access to the current goal or task, with shell and web tools disabled. Contextual resumes interrupted tasks when the app reopens.
+Install Codex CLI and sign in with `codex login`. Codex is the first backend in the AgentsRuntime registry. The desktop application selects one backend with `CONTEXTUAL_AGENTS_BACKEND=codex` (default); set `CONTEXTUAL_AGENTS_EXECUTABLE` to an absolute CLI path if needed. No global MCP registration is required for built-in runs: each execution receives a scoped stdio MCP configuration. Planning and task execution use the same runtime; built-in runs are text-oriented, read-only and disable shell and web tools. Interrupted queued tasks are recovered by the desktop worker. Hono does not execute agents.
 
 To connect a separate Codex session, launch Contextual once to initialize its database, then run the following from the development checkout. Replace the database path with the one under your Electron `userData` directory.
 
