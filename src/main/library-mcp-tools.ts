@@ -17,12 +17,12 @@ function result(value: unknown) {
 
 export function registerLibraryTools(server: McpServer, path: string, canEdit: boolean) {
   server.registerTool("list_diagrams", {
-    description: "List Contextual diagrams and flows by ID and name without their content.",
+    description: "List Contextual flows by ID and name.",
     annotations: readOnly,
-  }, async () => result((await readLibrary(path)).map(({ id, name, flow }) => ({ id, name, type: flow ? "flow" : "diagram" }))))
+  }, async () => result((await readLibrary(path)).map(({ id, name }) => ({ id, name, type: "flow" }))))
 
   server.registerTool("get_diagram", {
-    description: "Read a flow and its nodes, or the Mermaid source of a standalone diagram.",
+    description: "Read a flow and its nodes and content records.",
     inputSchema: z.strictObject({ diagramId: id }),
     annotations: readOnly,
   }, async ({ diagramId }) => {

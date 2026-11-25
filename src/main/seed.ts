@@ -1,93 +1,81 @@
-import type { FlowNode } from "../diagrams"
+import type { FlowContent } from "../diagrams"
 
-export const starterDiagrams = [
+export interface SeedFlow {
+  name: string
+  contents: SeedContent[]
+}
+
+type SeedContent = Pick<FlowContent, "id" | "parentId" | "kind" | "name">
+  & Partial<Pick<FlowContent, "body" | "status">>
+
+export const starterFlows: SeedFlow[] = [
   {
     name: "Creative review",
-    source: `flowchart LR
-  brief["Creative brief"] --> concept["First concept"]
-  concept --> review{"Review"}
-  review -->|Revise| concept
-  review -->|Approve| release["Ready to publish"]
-  classDef highlight fill:#f2dfd1,stroke:#b96d49,color:#37291f
-  class review highlight`,
+    contents: [
+      { id: 2, parentId: null, kind: "goal", name: "Подготовить креатив к публикации", status: "approved" },
+      { id: 3, parentId: 2, kind: "task", name: "Собрать первый концепт по брифу", status: "accepted" },
+      { id: 4, parentId: 3, kind: "solution", name: "Первый концепт", status: "review" },
+      { id: 5, parentId: 4, kind: "comment", name: "По итогам ревью уточнить заголовок" },
+      { id: 6, parentId: 3, kind: "solution", name: "Доработанный креатив готов к публикации", status: "accepted" },
+    ],
   },
   {
     name: "Asset handoff",
-    source: `sequenceDiagram
-  actor Designer
-  participant Library
-  actor Producer
-  Designer->>Library: Upload final assets
-  Producer->>Library: Request approved assets
-  Library-->>Producer: Return the approved version`,
+    contents: [
+      { id: 2, parentId: null, kind: "goal", name: "Передать утверждённые материалы продюсеру", status: "approved" },
+      { id: 3, parentId: 2, kind: "task", name: "Загрузить финальные файлы в библиотеку", status: "accepted" },
+      { id: 4, parentId: 3, kind: "solution", name: "Финальная версия доступна в библиотеке", status: "accepted" },
+      { id: 5, parentId: 2, kind: "task", name: "Запросить утверждённую версию из библиотеки", status: "accepted" },
+      { id: 6, parentId: 5, kind: "solution", name: "Продюсер получил утверждённую версию", status: "accepted" },
+    ],
   },
   {
     name: "Production states",
-    source: `stateDiagram-v2
-  [*] --> Draft
-  Draft --> InReview
-  InReview --> Draft: Changes requested
-  InReview --> Approved
-  Approved --> Published
-  Published --> [*]`,
+    contents: [
+      { id: 2, parentId: null, kind: "goal", name: "Провести материал от черновика до публикации", status: "approved" },
+      { id: 3, parentId: 2, kind: "task", name: "Подготовить черновик и пройти ревью", status: "accepted" },
+      { id: 4, parentId: 3, kind: "solution", name: "Черновик на ревью", status: "review" },
+      { id: 5, parentId: 4, kind: "comment", name: "Внести правки по итогам ревью" },
+      { id: 6, parentId: 3, kind: "solution", name: "Утверждённая версия", status: "accepted" },
+      { id: 7, parentId: 2, kind: "task", name: "Опубликовать утверждённую версию", status: "accepted" },
+      { id: 8, parentId: 7, kind: "solution", name: "Материал опубликован", status: "accepted" },
+    ],
   },
 ]
 
-export const contextualDevelopmentDiagramV2 = {
+export const contextualDevelopmentFlow: SeedFlow = {
   name: "Разработка Contextual",
-  source: `flowchart LR
-  product["Contextual<br/>Рабочее пространство для контент-креаторов"]
-
-  product --> foundation["Цель<br/>Перезапустить проект"]
-  foundation --> bootstrap["Задачи<br/>Создать ветку для TypeScript<br/>Настроить Electron Forge и Vite"]
-  bootstrap --> desktop["Готово<br/>Приложение запускается в dev-режиме<br/>Linux-сборка проверена"]
-
-  product --> library["Цель<br/>Открывать локальную библиотеку схем"]
-  library --> storage["Задачи<br/>Хранить исходники Mermaid в SQLite<br/>Заполнить базу примерами"]
-  storage --> seeded["Готово<br/>Примеры появляются при первом запуске<br/>Данные сохраняются между запусками"]
-
-  product --> viewer["Цель<br/>Просматривать схемы"]
-  viewer --> rendering["Задачи<br/>Рендерить Mermaid через Pele<br/>Связать интерфейс с Nano Stores и nanotags"]
-  rendering --> preview["Готово<br/>Просмотр схем и обработка ошибок рендера"]
-
-  product --> navigation["Цель<br/>Открывать каждую схему по адресу"]
-  navigation --> routing["Задачи<br/>Подключить Nano Stores Router<br/>Добавить /diagrams/:id и протокол app://"]
-  routing --> verified["Готово<br/>Прямое открытие, перезагрузка<br/>и переходы назад и вперёд проверены"]
-
-  product --> interaction["Цель<br/>Работать с вариантами контента на схеме"]
-  interaction --> selection["Обсудили<br/>Выбор узла и действия для выбранного узла"]
-  selection -.-> planned["Дальше<br/>Связать действия с агентом<br/>Добавить ветки и версии контента"]
-
-  classDef goal fill:#eee4d7,stroke:#846c53,color:#30271f
-  classDef done fill:#e5eee4,stroke:#667b63,color:#2c3b29
-  classDef future fill:#f1e8e2,stroke:#96705d,color:#4c3023
-  class product,foundation,library,viewer,navigation,interaction goal
-  class desktop,seeded,preview,verified done
-  class selection,planned future`,
+  contents: [
+    { id: 2, parentId: null, kind: "goal", name: "Перезапустить проект", body: "Рабочее пространство для контент-креаторов.", status: "approved" },
+    { id: 3, parentId: 2, kind: "task", name: "Создать ветку TypeScript и настроить Electron Forge и Vite", status: "accepted" },
+    { id: 4, parentId: 3, kind: "solution", name: "Настольное приложение запускается в dev-режиме", status: "accepted" },
+    { id: 5, parentId: 4, kind: "evidence", name: "Проверена сборка Linux", body: "Команда `npm run build`, коммит `afe05f7`." },
+    { id: 6, parentId: null, kind: "goal", name: "Открывать локальную библиотеку схем", status: "approved" },
+    { id: 7, parentId: 6, kind: "task", name: "Настроить хранение схем в SQLite и заполнить базу примерами", status: "accepted" },
+    { id: 8, parentId: 7, kind: "solution", name: "Примеры появляются при первом запуске и сохраняются между запусками", status: "accepted" },
+    { id: 9, parentId: 8, kind: "evidence", name: "Повторный запуск не дублирует пример", body: "Миграция v1 → v2 добавила одну схему. Коммит `4c6b843`." },
+    { id: 10, parentId: null, kind: "goal", name: "Просматривать схемы", status: "approved" },
+    { id: 11, parentId: 10, kind: "task", name: "Подключить Pele, Nano Stores и nanotags", status: "accepted" },
+    { id: 12, parentId: 11, kind: "solution", name: "Просмотр схем с обработкой ошибок отрисовки", status: "accepted" },
+    { id: 13, parentId: 12, kind: "evidence", name: "Скриншот из Linux-сборки", body: "На скриншоте Pele отрисовал 20 узлов." },
+    { id: 14, parentId: null, kind: "goal", name: "Открывать каждую схему по адресу", status: "approved" },
+    { id: 15, parentId: 14, kind: "task", name: "Подключить Nano Stores Router и настроить адреса схем", body: "Маршрут `/diagrams/:id` и протокол `app://`.", status: "accepted" },
+    { id: 16, parentId: 15, kind: "solution", name: "Прямое открытие, перезагрузка и переходы по истории работают", status: "accepted" },
+    { id: 17, parentId: 16, kind: "evidence", name: "Адрес схемы сохранился после перезагрузки", body: "Маршрут `/diagrams/2` открылся напрямую. Коммит `aeb17c9`." },
+    { id: 18, parentId: null, kind: "goal", name: "Работать с вариантами контента на схеме", status: "draft" },
+    { id: 19, parentId: 18, kind: "comment", name: "Обсудили выбор узла и действия для выбранного узла" },
+    { id: 20, parentId: 18, kind: "task", name: "Связать действия с агентом", status: "planned" },
+    { id: 21, parentId: 18, kind: "task", name: "Добавить ветки и версии контента", status: "planned" },
+  ],
 }
 
-export const contextualDevelopmentDiagram = {
-  name: contextualDevelopmentDiagramV2.name,
-  source: `${contextualDevelopmentDiagramV2.source}
-
-  desktop --> buildEvidence["Подтверждение<br/>Сборка Linux: npm run build<br/>Коммит afe05f7"]
-  seeded --> storageEvidence["Подтверждение<br/>Миграция v1 → v2 добавила одну схему<br/>Повторный запуск не создал дубль<br/>Коммит 4c6b843"]
-  preview --> renderEvidence["Подтверждение<br/>Pele отрисовал 20 узлов<br/>Скриншот из Linux-сборки"]
-  verified --> routeEvidence["Подтверждение<br/>/diagrams/2 открылась напрямую<br/>Перезагрузка сохранила адрес<br/>Коммит aeb17c9"]
-
-  classDef evidence fill:#e6edf3,stroke:#657986,color:#293b49
-  class buildEvidence,storageEvidence,renderEvidence,routeEvidence evidence`,
-}
-const wildberriesFlowName = "Подготовка карточки Wildberries"
-
-export const wildberriesFlow = {
-  name: wildberriesFlowName,
-  nodes: [
-    { id: 1, parentId: null, kind: "root", name: wildberriesFlowName },
-    { id: 2, parentId: 1, kind: "goal", name: "Подготовить первый слайд карточки WB" },
-    { id: 3, parentId: 2, kind: "task", name: "Собрать макет с ветровкой" },
+export const wildberriesFlow: SeedFlow = {
+  name: "Подготовка карточки Wildberries",
+  contents: [
+    { id: 2, parentId: null, kind: "goal", name: "Подготовить первый слайд карточки WB", status: "draft" },
+    { id: 3, parentId: 2, kind: "task", name: "Собрать макет с ветровкой", status: "review" },
     { id: 4, parentId: 3, kind: "comment", name: "Убрать логотип с флага" },
-    { id: 5, parentId: 3, kind: "solution", name: "Макет с крупным заголовком" },
+    { id: 5, parentId: 3, kind: "solution", name: "Макет с крупным заголовком", status: "review" },
     { id: 6, parentId: 5, kind: "evidence", name: "Предпросмотр в размере мобильной выдачи" },
   ],
-} satisfies { name: string; nodes: Omit<FlowNode, "contentIds">[] }
+}

@@ -39,7 +39,6 @@ async function readDiagrams(db: LibraryDatabase, id?: number): Promise<Diagram[]
   ])
   return entries.map((entry) => {
     const flowNodes = placements.filter((node) => node.diagramId === entry.id)
-    if (!flowNodes.length) return entry
 
     const flowContents = rows.filter((content) => content.diagramId === entry.id)
       .map(({ diagramId, ...content }) => content)
@@ -190,9 +189,9 @@ export function saveGoalTasks(path: string, diagramId: number, goalId: number, n
 
 export function createFlow(path: string, name: string) {
   return saveFlow(path, async (db) => {
-    const [{ id }] = await db.insert(diagrams).values({ name, source: "" }).returning({ id: diagrams.id })
+    const [{ id }] = await db.insert(diagrams).values({ name }).returning({ id: diagrams.id })
     const root = await insertPlacement(db, id, null, [], name)
-    return { id, name, source: "", flow: { nodes: [root], contents: [] } }
+    return { id, name, flow: { nodes: [root], contents: [] } }
   })
 }
 

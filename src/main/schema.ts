@@ -4,7 +4,6 @@ import type { ContentKind, ContentStatus } from "../diagrams"
 export const diagrams = sqliteTable("diagrams", {
   id: integer().primaryKey(),
   name: text().notNull(),
-  source: text().notNull(),
 })
 
 export const contents = sqliteTable("flow_contents", {

@@ -1,8 +1,7 @@
 export interface Diagram {
   id: number
   name: string
-  source: string
-  flow?: Flow
+  flow: Flow
 }
 
 export interface Flow {

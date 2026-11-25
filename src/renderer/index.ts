@@ -74,12 +74,12 @@ const ContextualLibrary = define("contextual-library")
         return state.diagrams.find(({ id }) => String(id) === page.params.id)
       }
     })
-    const $view = computed($selected, (selected) => selected?.flow ? flowView(selected.flow) : undefined)
+    const $view = computed($selected, (selected) => selected ? flowView(selected.flow) : undefined)
     const $diagramId = computed($selected, (selected) => selected?.id)
     const $diagramName = computed($selected, (selected) => selected?.name)
-    const $diagramSource = computed([$selected, $view], (selected, view) => view?.source ?? selected?.source)
+    const $diagramSource = computed($view, (view) => view?.source)
     const $inspector = computed([$selected, $inspection], (selected, inspection) => {
-      if (selected?.flow && selected.id === inspection?.diagramId) return inspectFlow(selected.flow, inspection)
+      if (selected && selected.id === inspection?.diagramId) return inspectFlow(selected.flow, inspection)
     })
 
     async function loadLibrary(signal: AbortSignal) {
@@ -175,7 +175,7 @@ const ContextualLibrary = define("contextual-library")
         openInspection(target)
         return
       }
-      if (!selected?.flow) return
+      if (!selected) return
       const editor = $editor.get()
       if (editor?.diagramId === selected.id) return
 
@@ -195,7 +195,7 @@ const ContextualLibrary = define("contextual-library")
     ctx.on(inspectorList, "click", (event) => {
       const selected = $selected.get()
       const id = Number((event.target as Element).closest("button[data-content-id]")?.getAttribute("data-content-id"))
-      if (!selected?.flow || !Number.isSafeInteger(id) || id < 1) return
+      if (!selected || !Number.isSafeInteger(id) || id < 1) return
       const nodeId = selected.flow.nodes.find((node) => node.contentIds.length === 1 && node.contentIds[0] === id)?.id
       $inspection.set({ diagramId: selected.id, nodeId, contentIds: [id] })
     })
@@ -292,7 +292,6 @@ const ContextualLibrary = define("contextual-library")
       title.textContent = name ?? "Diagram library"
       diagram.hidden = id === undefined
       const flow = $selected.get()?.flow
-      diagram.toggleAttribute("data-flow", Boolean(flow))
       if (source === undefined) return
 
       const root = flow?.nodes.find((node) => node.kind === "root")
@@ -303,7 +302,6 @@ const ContextualLibrary = define("contextual-library")
         onRender: () => {
           const svg = diagram.querySelector("svg")
           if (!svg) return
-          if (!root) svg.setAttribute("role", "img")
           svg.setAttribute("aria-label", name ?? "")
           if (root) overlayRootButton(svg, root)
           const view = $view.get()

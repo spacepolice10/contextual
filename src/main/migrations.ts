@@ -1,9 +1,64 @@
 import type { DatabaseSync } from "node:sqlite"
-import { contextualDevelopmentDiagram, contextualDevelopmentDiagramV2, starterDiagrams, wildberriesFlow } from "./seed"
+import { contextualDevelopmentDiagram, contextualDevelopmentDiagramV2, starterDiagrams } from "./legacy-seed"
+import { contextualDevelopmentFlow, starterFlows, wildberriesFlow, type SeedFlow } from "./seed"
+
+function migrateToFlows(db: DatabaseSync, version: number) {
+  const insertDiagram = db.prepare("INSERT INTO diagrams (name, source) VALUES (?, '')")
+  const insertNode = db.prepare("INSERT INTO flow_nodes (diagram_id, id, parent_id, name) VALUES (?, ?, ?, ?)")
+  const insertContent = db.prepare(`
+    INSERT INTO flow_contents (diagram_id, id, parent_id, kind, name, body, status) VALUES (?, ?, ?, ?, ?, ?, ?)
+  `)
+  const linkContent = db.prepare(`
+    INSERT INTO flow_node_contents (diagram_id, node_id, content_id, position) VALUES (?, ?, ?, 0)
+  `)
+
+  function writeFlow(flow: SeedFlow, diagramId = insertDiagram.run(flow.name).lastInsertRowid) {
+    const rootId = 1
+    insertNode.run(diagramId, rootId, null, flow.name)
+    for (const { id, parentId, kind, name, body, status } of flow.contents) {
+      insertContent.run(diagramId, id, parentId, kind, name, body ?? null, status ?? null)
+      insertNode.run(diagramId, id, parentId ?? rootId, null)
+      linkContent.run(diagramId, id, id)
+    }
+  }
+
+  if (version === 0) {
+    for (const flow of starterFlows) writeFlow(flow)
+  } else {
+    const legacyExamples = [...starterDiagrams, contextualDevelopmentDiagramV2, contextualDevelopmentDiagram]
+    const flowsByName = new Map([...starterFlows, contextualDevelopmentFlow].map((flow) => [flow.name, flow]))
+    const standalone = db.prepare(`
+      SELECT id, name, source FROM diagrams
+      WHERE NOT EXISTS (SELECT 1 FROM flow_nodes WHERE diagram_id = diagrams.id)
+    `).all() as { id: number; name: string; source: string }[]
+
+    for (const { id, name, source } of standalone) {
+      const seed = flowsByName.get(name)
+      const unchanged = legacyExamples.some((example) => example.name === name && example.source === source)
+      if (seed && unchanged) {
+        writeFlow(seed, id)
+      } else {
+        writeFlow({
+          name,
+          contents: source ? [
+            { id: 2, parentId: null, kind: "goal", name: "Сохранить исходную схему", status: "approved" },
+            { id: 3, parentId: 2, kind: "task", name: "Перенести исходный текст", status: "accepted" },
+            { id: 4, parentId: 3, kind: "solution", name: "Исходник Mermaid", body: source, status: "accepted" },
+          ] : [],
+        }, id)
+      }
+    }
+  }
+
+  if (version < 2) writeFlow(contextualDevelopmentFlow)
+  if (version < 4) writeFlow(wildberriesFlow)
+
+  db.exec("ALTER TABLE diagrams DROP COLUMN source; PRAGMA user_version = 8;")
+}
 
 export function migrate(db: DatabaseSync) {
   const schemaVersion = db.prepare("PRAGMA user_version")
-  if (Number(schemaVersion.get()?.user_version) < 7) {
+  if (Number(schemaVersion.get()?.user_version) < 8) {
     db.exec("BEGIN IMMEDIATE")
     // Another instance may have migrated the file while this one acquired the lock.
     const version = Number(schemaVersion.get()?.user_version)
@@ -15,16 +70,6 @@ export function migrate(db: DatabaseSync) {
           source TEXT NOT NULL
         ) STRICT
       `)
-      const insert = db.prepare("INSERT INTO diagrams (title, source) VALUES (?, ?)")
-      for (const { name, source } of starterDiagrams) insert.run(name, source)
-    }
-    if (version < 2) {
-      const { name, source } = contextualDevelopmentDiagram
-      db.prepare("INSERT INTO diagrams (title, source) VALUES (?, ?)").run(name, source)
-    } else if (version === 2) {
-      const { name, source } = contextualDevelopmentDiagramV2
-      db.prepare("UPDATE diagrams SET source = ? WHERE title = ? AND source = ?")
-        .run(contextualDevelopmentDiagram.source, name, source)
     }
     if (version < 4) {
       db.exec(`
@@ -42,15 +87,6 @@ export function migrate(db: DatabaseSync) {
 
         CREATE UNIQUE INDEX diagram_nodes_root ON diagram_nodes(diagram_id) WHERE kind = 'root';
       `)
-
-      const { lastInsertRowid } = db.prepare("INSERT INTO diagrams (title, source) VALUES (?, '')")
-        .run(wildberriesFlow.name)
-      const insert = db.prepare(`
-        INSERT INTO diagram_nodes (diagram_id, id, parent_id, kind, label) VALUES (?, ?, ?, ?, ?)
-      `)
-      for (const node of wildberriesFlow.nodes) {
-        insert.run(lastInsertRowid, node.id, node.parentId, node.kind, node.name)
-      }
     } else if (version === 4) {
       const previousTitle = "Карта работы с агентом"
       const renamed = db.prepare(`
@@ -131,6 +167,7 @@ export function migrate(db: DatabaseSync) {
       CREATE INDEX flow_node_contents_content ON flow_node_contents(diagram_id,content_id);
       PRAGMA user_version = 7;
     `)
+    if (version < 8) migrateToFlows(db, version)
     db.exec("COMMIT")
   }
 }

@@ -1,6 +1,6 @@
 # Contextual
 
-A desktop viewer for local Mermaid diagrams. The diagram library is stored as Mermaid source in SQLite and rendered with Obsidian’s Pele.
+A desktop workspace for local workflows. SQLite stores the flow nodes and content records. Contextual generates Mermaid from those records for Obsidian’s Pele.
 
 ## Run locally
 
@@ -11,7 +11,7 @@ npm ci
 npm start
 ```
 
-On first launch Contextual creates `diagrams.sqlite` under Electron’s `userData` directory and seeds example diagrams and a flow. Each sidebar link opens a diagram at `/diagrams/:id`. Browser history and reload retain the route.
+On first launch Contextual creates `diagrams.sqlite` under Electron’s `userData` directory and seeds example flows. Each sidebar link opens a diagram at `/diagrams/:id`. Browser history and reload retain the route.
 
 ```sh
 npm run typecheck
@@ -21,7 +21,7 @@ npm run make
 
 Forge writes the packaged desktop app and ZIP into `out/`.
 
-Drizzle ORM handles the library queries over Electron's bundled `node:sqlite`. Schema migrations preserve existing diagram and node IDs. Flow content has its own IDs and parent relationships. A placement can reference several records, and the same record can appear in multiple placements.
+Drizzle ORM handles the library queries over Electron's bundled `node:sqlite`. Schema migrations preserve existing diagram and node IDs. The Flow migration converts the original samples and keeps custom Mermaid source in a result record. Flow content has its own IDs and parent relationships. A placement can reference several records, and the same record can appear in multiple placements.
 
 ## Codex and Contextual MCP
 
